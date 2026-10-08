@@ -84,8 +84,8 @@ class DishService:
         self.db.commit()
 
     # ==================== 标签 ====================
-    def list_tags(self) -> List[DishTag]:
-        items = self.tags.all_ordered()
+    def list_tags(self, *, only_active: bool = False) -> List[DishTag]:
+        items = self.tags.all_ordered(only_active=only_active)
         counts = self.tags.dish_count_map()
         for item in items:
             item.dish_count = counts.get(item.id, 0)

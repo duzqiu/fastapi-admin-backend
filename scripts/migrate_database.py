@@ -11,7 +11,7 @@
     python scripts/migrate_database.py --target "postgresql+psycopg://user:pwd@127.0.0.1:5432/admin_db" --create-tables --truncate
 
     # 指定源库，并显式指定迁移哪些表
-    python scripts/migrate_database.py --source "sqlite:///./data/app.db" --target "mysql+pymysql://root:pwd@127.0.0.1:3306/admin_db?charset=utf8mb4" --create-tables --truncate --tables users,articles
+    python scripts/migrate_database.py --source "sqlite:///./data/app.db" --target "mysql+pymysql://root:pwd@127.0.0.1:3306/admin_db?charset=utf8mb4" --create-tables --truncate --tables users,members,dishes
 
     # 只校验两个库的数据行数是否一致
     python scripts/migrate_database.py --target "..." --verify-only
@@ -33,7 +33,7 @@ if str(ROOT) not in sys.path:
 
 from app.core.config import settings  # noqa: E402
 from app.db.base import Base  # noqa: E402
-from app.models import Article, User  # noqa: F401,E402  确保所有模型注册到 metadata
+from app.models import User  # noqa: F401,E402  确保所有模型注册到 metadata
 
 
 def build_parser() -> argparse.ArgumentParser:

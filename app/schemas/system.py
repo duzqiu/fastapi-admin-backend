@@ -35,11 +35,5 @@ class DashboardStatsOut(BaseModel):
     member_active: int = 0
     member_disabled: int = 0
     member_new_7_days: int = 0
-    # 内容
-    article_total: int = 0
-    article_published: int = 0
-    article_draft: int = 0
-    article_views: int = 0
 
-    recent_articles: list = Field(default_factory=list, description="最近更新的文章")
     recent_members: list = Field(default_factory=list, description="最近注册的会员")

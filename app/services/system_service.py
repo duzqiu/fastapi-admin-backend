@@ -7,8 +7,6 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.article import ArticleStatus
-from app.repositories.article_repository import ArticleRepository
 from app.repositories.member_repository import MemberRepository
 from app.repositories.user_repository import UserRepository
 
@@ -20,7 +18,6 @@ class SystemService:
         self.db = db
         self.users = UserRepository(db)
         self.members = MemberRepository(db)
-        self.articles = ArticleRepository(db)
 
     def health(self) -> Dict[str, Any]:
         """健康检查：同时探测数据库连通性。"""
@@ -60,24 +57,11 @@ class SystemService:
             "stats": {
                 "users": self.users.count(),
                 "members": self.members.count(),
-                "articles": self.articles.count(),
             },
         }
 
     def dashboard(self) -> Dict[str, Any]:
-        """后台首页统计卡片 + 最近文章 + 最近注册会员。"""
-        recent_articles: List[Dict[str, Any]] = [
-            {
-                "id": item.id,
-                "title": item.title,
-                "status": item.status,
-                "views": item.views,
-                "author_name": item.author_name,
-                "updated_at": item.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
-            }
-            for item in self.articles.recent(limit=5)
-        ]
-
+        """后台首页统计卡片 + 最近注册会员。"""
         recent_members: List[Dict[str, Any]] = [
             {
                 "id": item.id,
@@ -102,10 +86,5 @@ class SystemService:
             "member_active": member_active,
             "member_disabled": member_total - member_active,
             "member_new_7_days": self.members.count_registered_within_days(7),
-            "article_total": self.articles.count(),
-            "article_published": self.articles.published_count(),
-            "article_draft": self.articles.count_by_status(ArticleStatus.DRAFT.value),
-            "article_views": self.articles.total_views(),
-            "recent_articles": recent_articles,
             "recent_members": recent_members,
         }

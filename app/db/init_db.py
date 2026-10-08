@@ -15,7 +15,6 @@ from app.core.utils import utcnow
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models import (  # noqa: F401  确保模型已注册
-    Article,
     Dish,
     DishCategory,
     DishSpec,
@@ -26,35 +25,6 @@ from app.models import (  # noqa: F401  确保模型已注册
 )
 from app.models.member import MemberGender
 from app.models.user import UserRole
-
-DEFAULT_ARTICLES = [
-    {
-        "title": "快速开始：本地运行后端服务",
-        "summary": "介绍如何安装依赖、初始化 SQLite 数据库并启动 FastAPI 服务。",
-        "content": "执行 `pip install -r requirements.txt`，然后 `python scripts/init_db.py` 初始化数据库，"
-        "最后 `python run.py` 启动服务，浏览器访问 http://127.0.0.1:8000/docs 查看接口文档。",
-        "status": "published",
-        "tags": "FastAPI,快速开始",
-    },
-    {
-        "title": "如何迁移到 PostgreSQL / MySQL",
-        "summary": "通过配置 DATABASE_URL 与数据迁移脚本，把本地 SQLite 平滑迁移到生产数据库。",
-        "content": "修改 .env 中的 DATABASE_URL 指向目标库，然后执行 "
-        "`python scripts/migrate_database.py --target <目标库URL> --create-tables --truncate`，"
-        "脚本会按外键顺序复制所有数据并校验行数。",
-        "status": "published",
-        "tags": "数据库,迁移",
-    },
-    {
-        "title": "前后端分离部署说明（草稿）",
-        "summary": "前端 Vue 项目通过 VITE_API_BASE_URL 指向后端，Nginx 反向代理 /api 到后端服务。",
-        "content": "前端构建产物为静态文件，可部署到任意静态服务器；后端通过 uvicorn/gunicorn 独立部署，"
-        "两者仅通过 HTTP 接口通讯。",
-        "status": "draft",
-        "tags": "部署,Nginx",
-    },
-]
-
 
 # 用户中心演示会员（密码统一 members123，昵称/性别/生日为一个完整资料示例）
 DEFAULT_MEMBERS = [
@@ -119,20 +89,6 @@ def create_initial_superuser(db: Session) -> None:
         settings.FIRST_SUPERUSER_USERNAME,
         settings.FIRST_SUPERUSER_PASSWORD,
     )
-
-
-def create_initial_articles(db: Session) -> None:
-    """写入演示用文章数据（表中无数据时才写入）。"""
-    count = db.execute(select(Article)).scalars().first()
-    if count:
-        return
-    admin = db.execute(
-        select(User).where(User.username == settings.FIRST_SUPERUSER_USERNAME)
-    ).scalars().first()
-    for item in DEFAULT_ARTICLES:
-        db.add(Article(author_id=admin.id if admin else None, **item))
-    db.commit()
-    logger.info("已写入 %d 条演示文章数据", len(DEFAULT_ARTICLES))
 
 
 def create_initial_members(db: Session) -> None:
@@ -298,7 +254,6 @@ def init_db() -> None:
     db = SessionLocal()
     try:
         create_initial_superuser(db)
-        create_initial_articles(db)
         create_initial_members(db)
         create_initial_dishes(db)
     finally:

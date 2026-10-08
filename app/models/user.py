@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, String
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.models.mixins import PKMixin, TimestampMixin
@@ -40,10 +40,6 @@ class User(PKMixin, TimestampMixin, Base):
     )
     last_login_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True, comment="最后登录时间"
-    )
-
-    articles: Mapped[list["Article"]] = relationship(  # noqa: F821
-        "Article", back_populates="author", lazy="selectin"
     )
 
     @property

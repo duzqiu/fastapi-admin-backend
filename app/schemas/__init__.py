@@ -3,13 +3,6 @@
 职责：定义接口出入参结构、做基础校验，不承载业务逻辑。
 """
 
-from app.schemas.article import (
-    ArticleCreate,
-    ArticleListItem,
-    ArticleOut,
-    ArticleStatusUpdate,
-    ArticleUpdate,
-)
 from app.schemas.auth import LoginRequest, RefreshRequest, Token
 from app.schemas.common import MessageResponse, ORMBaseModel, PageResult, UploadOut
 from app.schemas.dish import (
@@ -69,11 +62,6 @@ from app.schemas.user import (
 )
 
 __all__ = [
-    "ArticleCreate",
-    "ArticleListItem",
-    "ArticleOut",
-    "ArticleStatusUpdate",
-    "ArticleUpdate",
     "LoginRequest",
     "RefreshRequest",
     "Token",

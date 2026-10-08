@@ -55,8 +55,11 @@ class DishTagRepository(BaseRepository[DishTag]):
     def __init__(self, db: Session) -> None:
         super().__init__(DishTag, db)
 
-    def all_ordered(self) -> List[DishTag]:
-        stmt = select(DishTag).order_by(DishTag.sort.asc(), DishTag.id.asc())
+    def all_ordered(self, *, only_active: bool = False) -> List[DishTag]:
+        stmt = select(DishTag)
+        if only_active:
+            stmt = stmt.where(DishTag.is_active.is_(True))
+        stmt = stmt.order_by(DishTag.sort.asc(), DishTag.id.asc())
         return list(self.db.execute(stmt).scalars().all())
 
     def name_taken(self, name: str, exclude_id: Optional[int] = None) -> bool:

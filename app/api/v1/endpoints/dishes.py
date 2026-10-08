@@ -79,8 +79,12 @@ def delete_category(
 
 # ==================== 标签 ====================
 @tag_router.get("", response_model=List[DishTagOut], summary="标签列表")
-def list_tags(service: DishService = Depends(get_dish_service)) -> List[DishTagOut]:
-    return [DishTagOut.model_validate(item) for item in service.list_tags()]
+def list_tags(
+    only_active: bool = Query(False, description="只返回启用的标签"),
+    service: DishService = Depends(get_dish_service),
+) -> List[DishTagOut]:
+    items = service.list_tags(only_active=only_active)
+    return [DishTagOut.model_validate(item) for item in items]
 
 
 @tag_router.post(

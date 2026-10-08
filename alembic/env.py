@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
 from app.core.config import settings  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.session import build_engine  # noqa: E402
-from app.models import Article, User  # noqa: F401,E402  确保模型都已注册
+from app.models import User  # noqa: F401,E402  确保模型都已注册
 
 config = context.config
 target_metadata = Base.metadata

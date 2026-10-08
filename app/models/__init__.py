@@ -4,7 +4,6 @@
 建表与迁移都不会生效。
 """
 
-from app.models.article import Article, ArticleStatus
 from app.models.dish import Dish, DishCategory, DishSpec, DishStatus, DishTag, dish_tag_links
 from app.models.dish_order import ORDER_TRANSITIONS, DishOrder, DishOrderItem, OrderStatus
 from app.models.email_code import EmailCode, EmailScene
@@ -12,8 +11,6 @@ from app.models.member import Member, MemberGender
 from app.models.user import User, UserRole
 
 __all__ = [
-    "Article",
-    "ArticleStatus",
     "Dish",
     "DishCategory",
     "DishSpec",

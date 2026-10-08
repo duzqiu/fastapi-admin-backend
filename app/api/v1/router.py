@@ -3,7 +3,6 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
-    articles,
     auth,
     dish_orders,
     dishes,
@@ -34,5 +33,4 @@ api_router.include_router(dishes.router)
 api_router.include_router(dishes.category_router)
 api_router.include_router(dishes.tag_router)
 api_router.include_router(dish_orders.router)
-api_router.include_router(articles.router)
 api_router.include_router(system.router)

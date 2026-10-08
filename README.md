@@ -38,7 +38,7 @@
 | 后台账号认证鉴权 | 账号密码登录、JWT（access + refresh）、角色权限（admin / editor / user） |
 | 用户中心（会员） | 邮箱验证码注册、登录、忘记密码、个人资料（昵称/头像/性别/生日/简介）、头像上传 |
 | 点菜菜单与订单 | 菜品（菜名/图片/价格/库存）、**多套餐与售卖规则**（起购 / 限购 / 每日限量 / 供应时段）、分类与标签、**销量统计**、下单与订单管理闭环 |
-| 通用后台 CRUD | 后台用户管理、**会员管理**（查看 / 修改 / 启禁用 / 重置密码 / 删除）、菜品管理、订单管理、文章管理 |
+| 通用后台 CRUD | 后台用户管理、**会员管理**（查看 / 修改 / 启禁用 / 重置密码 / 删除）、菜品管理、订单管理 |
 | 分层基础设施 | 统一配置、统一异常、统一分页、请求日志、跨域、邮件、文件上传、初始化与迁移脚本 |
 
 设计目标：**高内聚**（每种职能只出现在固定的一层里）、**低耦合**（上层依赖下层接口，替换任一层的实现不影响其他层）。
@@ -126,7 +126,7 @@ fastapi-admin-backend/
 │   ├── db/                             ★ 数据访问基础设施
 │   │   ├── base.py                     SQLAlchemy DeclarativeBase
 │   │   ├── session.py                  引擎构建（自动适配 SQLite/PG/MySQL）、会话工厂、get_db
-│   │   └── init_db.py                  建表 + 初始管理员 + 演示文章/会员数据（幂等）
+│   │   └── init_db.py                  建表 + 初始管理员 + 演示会员/菜品数据（幂等）
 │   │
 │   ├── models/                         ★ ORM 模型层
 │   │   ├── mixins.py                   主键 / 时间戳 Mixin
@@ -135,7 +135,6 @@ fastapi-admin-backend/
 │   │   ├── email_code.py               邮箱验证码表 + EmailScene 枚举（场景）
 │   │   ├── dish.py                     菜品域：分类 / 标签 / 菜品 / 套餐规格（含售卖规则）
 │   │   ├── dish_order.py               订单域：订单、订单明细、状态流转规则
-│   │   ├── article.py                  文章表 + ArticleStatus 枚举
 │   │   └── __init__.py                 统一导出（新增模型必须在此注册）
 │   │
 │   ├── schemas/                        ★ DTO 层
@@ -145,7 +144,6 @@ fastapi-admin-backend/
 │   │   ├── email.py                    验证码发送出入参
 │   │   ├── dish.py                     菜品域出入参（分类 / 标签 / 菜品 / 套餐 / 点菜菜单）
 │   │   ├── dish_order.py               订单出入参（下单、明细、状态、统计）
-│   │   ├── article.py                  文章出入参（标签自动归一化）
 │   │   ├── auth.py                     登录 / 令牌模型
 │   │   ├── system.py                   健康检查、系统信息、首页统计
 │   │   └── __init__.py                 统一导出
@@ -157,7 +155,6 @@ fastapi-admin-backend/
 │   │   ├── email_code_repository.py    验证码查询、作废、尝试次数
 │   │   ├── dish_repository.py          分类 / 标签 / 菜品 / 套餐查询与统计
 │   │   ├── dish_order_repository.py    订单查询、状态计数、按明细聚合销量
-│   │   ├── article_repository.py       文章表专属查询
 │   │   └── __init__.py
 │   │
 │   ├── services/                       ★ 服务层（业务逻辑）
@@ -168,7 +165,6 @@ fastapi-admin-backend/
 │   │   ├── member_service.py           会员资料 + 头像上传 + 后台管理
 │   │   ├── dish_service.py             分类 / 标签 / 菜品 / 套餐管理 + 点菜菜单查询
 │   │   ├── dish_order_service.py       下单校验、库存销量联动、取消回滚、状态流转、统计
-│   │   ├── article_service.py          文章 CRUD + 浏览量统计
 │   │   ├── system_service.py           健康检查 / 系统信息 / 首页统计
 │   │   └── __init__.py
 │   │
@@ -185,7 +181,6 @@ fastapi-admin-backend/
 │   │           ├── menu.py             /menu/*         点菜菜单：分类、菜品、下单、我的订单
 │   │           ├── dishes.py           /dishes/*       后台菜品 / 分类 / 标签管理
 │   │           ├── dish_orders.py      /dish-orders/*  后台订单管理与统计
-│   │           ├── articles.py          /articles/*     文章管理
 │   │           └── system.py            /system/*       健康检查、系统信息、首页统计
 │   │
 │   └── middlewares/
@@ -203,7 +198,7 @@ fastapi-admin-backend/
 │
 ├── tests/
 │   ├── conftest.py                     测试夹具（内存 SQLite、TestClient、鉴权头）
-│   ├── test_api.py                     认证 / 用户 / 文章主链路冒烟测试
+│   ├── test_api.py                     认证 / 后台账号主链路冒烟测试
 │   ├── test_member.py                  用户中心全流程测试
 │   └── test_dish.py                    点菜菜单、套餐规则与订单全流程测试
 │
@@ -241,7 +236,7 @@ Copy-Item .env.example .env
 ### 3. 初始化数据库
 
 ```powershell
-# 建表 + 创建管理员 + 写入演示文章数据（幂等，可重复执行）
+# 建表 + 创建管理员 + 写入演示会员/菜品数据（幂等，可重复执行）
 ./.venv/Scripts/python.exe scripts/init_db.py
 ```
 
@@ -392,24 +387,13 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
 | PATCH | `/members/{id}/password` | 重置会员密码 |
 | DELETE | `/members/{id}` | 删除会员 |
 
-### 文章 `/articles`
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/articles` | 分页列表，支持 `keyword` `status` `author_id` |
-| POST | `/articles` | 创建文章 |
-| GET | `/articles/{id}` | 详情（浏览量 +1） |
-| PUT | `/articles/{id}` | 更新文章 |
-| PATCH | `/articles/{id}/status` | 修改状态（draft / published / archived） |
-| DELETE | `/articles/{id}` | 删除文章 |
-
 ### 系统 `/system`
 
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
 | GET | `/system/health` | 健康检查（含数据库探活） | 公开 |
 | GET | `/system/info` | 运行信息、数据库方言、各表行数 | 管理员 |
-| GET | `/system/dashboard` | 首页统计卡片数据 + 最近文章 + 最近注册会员 | 登录 |
+| GET | `/system/dashboard` | 首页统计卡片数据 + 最近注册会员 | 登录 |
 
 ### 静态资源 `/static`
 
@@ -518,7 +502,7 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/member/auth/send-code `
 
 ### 8.6 后台如何管理会员
 
-进入前端 `fastapi-admin-frontend` 的「会员管理」菜单（仅 `admin` 角色可见）：
+进入前端 `fastapi-admin-frontend` 的「用户列表」菜单（用户管理 ▸ 用户列表，仅 `admin` 角色可见）：
 
 - **查看**：列表支持 关键词（邮箱/昵称/手机号）、性别、启用状态、邮箱验证状态 组合筛选；
   点「详情」查看完整资料（含年龄、验证时间、最后登录、注册时间）。
@@ -561,7 +545,7 @@ DishOrder   n ──── 1 Member                                 （扫码点
 | 模型 | 表 | 说明 |
 | --- | --- | --- |
 | `DishCategory` | `dish_categories` | 菜品分类（热菜 / 凉菜 / 主食 / 饮品…），一个菜品属于一个分类 |
-| `DishTag` | `dish_tags` + `dish_tag_links` | 菜品标签（招牌 / 新品 / 微辣 / 素食…），一个菜品可有多个标签 |
+| `DishTag` | `dish_tags` + `dish_tag_links` | 菜品标签（招牌 / 新品 / 微辣 / 素食…），一个菜品可有多个标签；带 `is_active` 启用状态 |
 | `Dish` | `dishes` | 菜名、图片、价格、库存、**累计销量**、单位、状态、是否推荐、排序 |
 | `DishSpec` | `dish_specs` | 套餐 / 规格（单点 / 单人套餐 / 双人套餐…），承载独立价格、库存、销量与**售卖规则** |
 | `DishOrder` | `dish_orders` | 订单主表：订单号、桌号、会员、状态、总份数、总金额、备注、各状态时间 |
@@ -625,7 +609,7 @@ DishOrder   n ──── 1 Member                                 （扫码点
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/menu/categories` | 菜单分类（只含启用且有在售菜品的分类，附带可点数量） |
-| GET | `/menu/tags` | 菜单标签 |
+| GET | `/menu/tags` | 菜单标签（只含已启用的标签） |
 | GET | `/menu/dishes` | 菜品列表，支持 `keyword` `category_id` `tag_id` `is_recommended`；默认只返回在售且有库存的菜品 |
 | GET | `/menu/dishes/{id}` | 菜品详情，含全部可售套餐与售卖规则 |
 | POST | `/menu/orders` | **提交订单**（带会员令牌则关联会员，否则记为扫码点单） |
@@ -645,10 +629,10 @@ DishOrder   n ──── 1 Member                                 （扫码点
 | GET / POST | `/dishes/{id}/specs` | 套餐列表 / 新增套餐 |
 | PUT / DELETE | `/dishes/{id}/specs/{spec_id}` | 更新 / 删除套餐 |
 | GET | `/dishes/stats` | 菜品统计（总数 / 在售 / 库存告急 / 累计销量 / 销量排行） |
-| GET / POST | `/dish-categories` | 分类列表（含菜品数）/ 新建分类 |
+| GET / POST | `/dish-categories` | 分类列表（含菜品数，支持 `only_active`）/ 新建分类 |
 | PUT / DELETE | `/dish-categories/{id}` | 更新 / 删除（分类下有菜品时不允许删除） |
-| GET / POST | `/dish-tags` | 标签列表（含关联菜品数）/ 新建标签 |
-| PUT / DELETE | `/dish-tags/{id}` | 更新 / 删除标签 |
+| GET / POST | `/dish-tags` | 标签列表（含关联菜品数，支持 `only_active`）/ 新建标签 |
+| PUT / DELETE | `/dish-tags/{id}` | 更新 / 删除标签（更新支持局部字段，如只传 `is_active`） |
 
 **后台订单管理** `/api/v1/dish-orders`（仅管理员）
 
@@ -746,7 +730,7 @@ CREATE DATABASE admin_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_c
   --create-tables --truncate
 
 # 只迁移指定的表
-... --tables users,articles
+... --tables users,members,dishes,dish_orders
 
 # 只校验两个库行数是否一致，不写入任何数据
 ./.venv/Scripts/python.exe scripts/migrate_database.py --target "<目标库URL>" --verify-only
@@ -832,6 +816,45 @@ DATABASE_URL=mysql+pymysql://root:root@127.0.0.1:3306/admin_db?charset=utf8mb4
 > 迁移到 PostgreSQL / MySQL 后，如果目标库的表是迁移脚本（10.3 节）创建的，
 > 同样先执行 `alembic stamp head` 建立基线，再继续做增量变更。
 
+### 11.1 删除模型后残留的旧表
+
+`create_all()` 与 Alembic 都**不会自动删除**已经被移除模型的表。
+例如早期版本的内容模块（`articles`）已下线，若你的数据库是在那之前创建的，
+可以按下面的方式清理这张不再使用的表：
+
+```powershell
+# SQLite（本地开发库）
+./.venv/Scripts/python.exe -c "import sqlite3; c=sqlite3.connect('data/app.db'); c.execute('DROP TABLE IF EXISTS articles'); c.commit(); c.close()"
+```
+
+```sql
+-- PostgreSQL / MySQL
+DROP TABLE IF EXISTS articles;
+```
+
+> 不清理也不影响运行：ORM 已不再映射该表，`scripts/init_db.py` 与数据迁移脚本
+> 都只处理当前 `Base.metadata` 中的表。
+
+### 11.2 给已有表补充新列
+
+`create_all()` 同样**只建表、不改表**：新的模型字段不会自动加到已存在的表上，
+此时查询会报 `no such column`。二选一处理：
+
+```powershell
+# 方式一（推荐，可回溯）：用 Alembic 生成并执行增量迁移
+./.venv/Scripts/python.exe -m alembic revision --autogenerate -m "add dish_tags.is_active"
+./.venv/Scripts/python.exe -m alembic upgrade head
+```
+
+```sql
+-- 方式二：手工执行等价的 DDL
+ALTER TABLE dish_tags ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1;   -- SQLite / PostgreSQL
+ALTER TABLE dish_tags ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1; -- MySQL
+```
+
+> 本地开发库已经补过这一列（`dish_tags.is_active`，历史数据默认启用）；
+> 全新的数据库由 `create_all()` 直接建出带该列的完整表，无需处理。
+
 ---
 
 ## 十二、测试
@@ -848,9 +871,9 @@ DATABASE_URL=mysql+pymysql://root:root@127.0.0.1:3306/admin_db?charset=utf8mb4
 
 | 测试文件 | 覆盖点 |
 | --- | --- |
-| `tests/test_api.py` | 健康检查、后台登录成功/失败、令牌校验、后台用户增删改查、文章全流程 |
+| `tests/test_api.py` | 健康检查、后台登录成功/失败、令牌校验、后台用户增删改查 |
 | `tests/test_member.py` | 验证码场景校验与冷却、注册（重复/错误码/弱密码）、会员登录与刷新、令牌作用域隔离、资料修改、头像上传（含非法文件）、修改密码、验证码重置密码、后台会员管理全流程 |
-| `tests/test_dish.py` | 分类/标签 CRUD、菜品与套餐增删改、图片上传、点菜菜单浏览、下单（无套餐/有套餐）、库存与销量联动、起购/限购/每日限量/供应时段校验、取消订单回滚、后台订单状态流转、会员与管理员权限隔离 |
+| `tests/test_dish.py` | 分类/标签 CRUD、标签启用状态（`only_active` 过滤与 C 端隐藏）、菜品与套餐增删改、图片上传、点菜菜单浏览、下单（无套餐/有套餐）、库存与销量联动、起购/限购/每日限量/供应时段校验、取消订单回滚、后台订单状态流转、会员与管理员权限隔离 |
 
 ---
 

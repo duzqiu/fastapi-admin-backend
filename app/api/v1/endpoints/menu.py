@@ -29,9 +29,10 @@ router = APIRouter(prefix="/menu", tags=["点菜菜单"])
 
 
 def _to_menu_item(dish: Dish) -> MenuDishItem:
-    """组装点菜菜单条目：只暴露可售的套餐。"""
+    """组装点菜菜单条目：只暴露可售的套餐与已启用的标签。"""
     item = MenuDishItem.model_validate(dish)
     item.specs = [DishSpecOut.model_validate(spec) for spec in dish.specs if spec.is_active]
+    item.tags = [DishTagOut.model_validate(tag) for tag in dish.tags if tag.is_active]
     return item
 
 
@@ -43,7 +44,9 @@ def menu_categories(service: DishService = Depends(get_dish_service)) -> List[Me
 
 @router.get("/tags", response_model=List[DishTagOut], summary="菜单标签")
 def menu_tags(service: DishService = Depends(get_dish_service)) -> List[DishTagOut]:
-    return [DishTagOut.model_validate(item) for item in service.list_tags()]
+    """只返回启用的标签（与菜单分类一致，停用的标签不对顾客展示）。"""
+    items = service.list_tags(only_active=True)
+    return [DishTagOut.model_validate(item) for item in items]
 
 
 @router.get("/dishes", response_model=PageResult[MenuDishItem], summary="菜单菜品列表")

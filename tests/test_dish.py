@@ -99,6 +99,41 @@ def test_tag_crud(client, auth_headers):
     assert client.delete(TAGS + f"/{tag_id}", headers=auth_headers).status_code == 200
 
 
+def test_tag_is_active(client, auth_headers):
+    """标签启用状态：停用后 C 端菜单不再暴露，但后台仍可查看与绑定。"""
+    tag_id = _create_tag(client, auth_headers, "测试标签-可停用")
+    tags = client.get(TAGS, headers=auth_headers).json()
+    assert next(item for item in tags if item["id"] == tag_id)["is_active"] is True
+    assert any(item["id"] == tag_id for item in client.get(f"{MENU}/tags").json())
+
+    # 停用前：菜品与菜单都能看到该标签
+    dish = _create_dish(client, auth_headers, name="测试菜-停用标签", tag_ids=[tag_id])
+    assert any(tag["id"] == tag_id for tag in dish["tags"])
+
+    # 停用标签（PUT 支持局部更新）
+    updated = client.put(TAGS + f"/{tag_id}", headers=auth_headers, json={"is_active": False})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["is_active"] is False
+
+    # 后台列表默认仍返回它，only_active=true 时才过滤掉
+    assert any(
+        item["id"] == tag_id for item in client.get(TAGS, headers=auth_headers).json()
+    )
+    assert all(
+        item["id"] != tag_id
+        for item in client.get(TAGS, params={"only_active": True}, headers=auth_headers).json()
+    )
+
+    # C 端：菜单标签列表与菜品携带的标签都不再暴露停用标签
+    assert all(item["id"] != tag_id for item in client.get(f"{MENU}/tags").json())
+    detail = client.get(f"{MENU}/dishes/{dish['id']}").json()
+    assert all(tag["id"] != tag_id for tag in detail["tags"])
+
+    # 重新启用后恢复展示
+    client.put(TAGS + f"/{tag_id}", headers=auth_headers, json={"is_active": True})
+    assert any(item["id"] == tag_id for item in client.get(f"{MENU}/tags").json())
+
+
 # ==================== 菜品与套餐 ====================
 def test_dish_crud_with_specs(client, auth_headers):
     category_id = _create_category(client, auth_headers, "测试分类-套餐")

@@ -51,6 +51,7 @@ class DishTagCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=30)
     color: str = Field(default="", max_length=20, description="Element Plus 语义色或 #RRGGBB")
     sort: int = Field(default=0, ge=0)
+    is_active: bool = Field(default=True, description="是否启用")
 
 
 class DishTagUpdate(BaseModel):
@@ -59,6 +60,7 @@ class DishTagUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=30)
     color: Optional[str] = Field(default=None, max_length=20)
     sort: Optional[int] = Field(default=None, ge=0)
+    is_active: Optional[bool] = Field(default=None, description="是否启用")
 
 
 class DishTagOut(ORMBaseModel):
@@ -68,6 +70,7 @@ class DishTagOut(ORMBaseModel):
     name: str
     color: str
     sort: int
+    is_active: bool = True
     dish_count: int = 0
     created_at: datetime
 

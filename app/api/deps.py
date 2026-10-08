@@ -21,7 +21,6 @@ from app.core.security import TOKEN_SCOPE_MEMBER, TOKEN_SCOPE_STAFF, TOKEN_TYPE_
 from app.db.session import get_db
 from app.models.member import Member
 from app.models.user import User, UserRole
-from app.services.article_service import ArticleService
 from app.services.auth_service import AuthService
 from app.services.dish_order_service import DishOrderService
 from app.services.dish_service import DishService
@@ -80,10 +79,6 @@ def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
 
 def get_user_service(db: Session = Depends(get_db)) -> UserService:
     return UserService(db)
-
-
-def get_article_service(db: Session = Depends(get_db)) -> ArticleService:
-    return ArticleService(db)
 
 
 def get_system_service(db: Session = Depends(get_db)) -> SystemService:

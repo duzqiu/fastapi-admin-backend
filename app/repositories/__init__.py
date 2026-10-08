@@ -6,7 +6,6 @@
 - 服务层不得直接使用 SQLAlchemy 语句，必须通过仓储访问数据。
 """
 
-from app.repositories.article_repository import ArticleRepository
 from app.repositories.base import BaseRepository
 from app.repositories.dish_order_repository import DishOrderRepository
 from app.repositories.dish_repository import (
@@ -20,7 +19,6 @@ from app.repositories.member_repository import MemberRepository
 from app.repositories.user_repository import UserRepository
 
 __all__ = [
-    "ArticleRepository",
     "BaseRepository",
     "DishCategoryRepository",
     "DishOrderRepository",

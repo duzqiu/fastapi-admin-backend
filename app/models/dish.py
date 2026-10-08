@@ -68,7 +68,11 @@ class DishCategory(PKMixin, TimestampMixin, Base):
 
 
 class DishTag(PKMixin, TimestampMixin, Base):
-    """菜品标签（招牌、新品、微辣……），一个菜品可以有多个标签。"""
+    """菜品标签（招牌、新品、微辣……），一个菜品可以有多个标签。
+
+    `is_active` 与分类的同名字段语义一致：停用后不再出现在 C 端菜单的标签列表中，
+    后台仍可正常查看、编辑并继续挂在菜品上（不影响历史数据）。
+    """
 
     __tablename__ = "dish_tags"
 
@@ -79,6 +83,7 @@ class DishTag(PKMixin, TimestampMixin, Base):
         String(20), default="", comment="标签颜色：Element Plus 语义色或 #RRGGBB"
     )
     sort: Mapped[int] = mapped_column(Integer, default=0, comment="排序值")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, comment="是否启用")
 
     dishes: Mapped[List["Dish"]] = relationship(
         "Dish", secondary=dish_tag_links, back_populates="tags"
