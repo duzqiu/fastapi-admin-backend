@@ -1,0 +1,56 @@
+"""通用工具函数。"""
+
+from datetime import date, datetime, time, timezone
+from typing import Optional
+
+
+def utcnow() -> datetime:
+    """返回「无时区信息」的 UTC 时间。
+
+    统一使用 naive UTC 时间可以避免 SQLite / PostgreSQL / MySQL
+    三种数据库在时区处理上的差异。用于所有落库的时间戳。
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def local_now() -> datetime:
+    """服务器本地时间。
+
+    仅用于与「营业时间」相关的业务规则（菜品供应时段、每日限量重置），
+    这些规则按门店所在地的墙上时间判断，而不是 UTC。
+    """
+    return datetime.now()
+
+
+def local_today() -> date:
+    """服务器本地日期，用于每日限量的按天重置。"""
+    return datetime.now().date()
+
+
+def parse_hhmm(value: Optional[str]) -> Optional[time]:
+    """把 "HH:MM" 解析为 time 对象；空值或非法值返回 None。"""
+    if not value:
+        return None
+    try:
+        return time.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def in_time_window(
+    now: Optional[time], start: Optional[str], end: Optional[str]
+) -> bool:
+    """判断当前时间是否落在 [start, end] 内。
+
+    - 起止都为空：全天不限
+    - start <= end：常规时段
+    - start > end：跨零点时段（如 22:00 - 02:00）
+    """
+    start_time = parse_hhmm(start)
+    end_time = parse_hhmm(end)
+    if start_time is None or end_time is None:
+        return True
+    current = now or local_now().time()
+    if start_time <= end_time:
+        return start_time <= current <= end_time
+    return current >= start_time or current <= end_time

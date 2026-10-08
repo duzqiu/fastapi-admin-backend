@@ -1,0 +1,1 @@
+# 迁移脚本目录：alembic revision --autogenerate -m "描述" 生成的文件会放在这里
