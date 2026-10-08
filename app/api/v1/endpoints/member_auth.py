@@ -52,7 +52,7 @@ def register(
     request: Request,
     service: MemberAuthService = Depends(get_member_auth_service),
 ) -> Member:
-    """注册成功后邮箱即视为已验证，并自动生成默认昵称（可在个人中心修改）。"""
+    """注册成功后邮箱即视为已验证，并自动生成默认昵称、使用默认头像（均可在个人中心修改）。"""
     member = service.register(payload, get_client_ip(request))
     return member
 
@@ -82,6 +82,7 @@ def reset_password(
     payload: MemberResetPassword,
     service: MemberAuthService = Depends(get_member_auth_service),
 ) -> MessageResponse:
+    """入参 `confirm_password` 需与 `new_password` 一致。"""
     service.reset_password(payload)
     return MessageResponse(message="密码重置成功，请使用新密码登录")
 

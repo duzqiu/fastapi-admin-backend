@@ -1,13 +1,14 @@
-"""用户中心（会员）个人中心接口：资料查看/修改、头像上传、修改密码。
+"""用户中心（会员）个人中心接口：资料查看/修改、头像上传、修改密码（邮箱验证码）。
 
 前缀 `/member`，需要会员令牌（scope=member）。
 """
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Request, UploadFile
 
-from app.api.deps import get_current_member, get_member_auth_service, get_member_service
+from app.api.deps import get_client_ip, get_current_member, get_member_auth_service, get_member_service
 from app.models.member import Member
 from app.schemas.common import MessageResponse
+from app.schemas.email import SendCodeResponse
 from app.schemas.member import (
     AvatarUploadOut,
     MemberChangePassword,
@@ -49,11 +50,30 @@ def upload_avatar(
     return AvatarUploadOut(**result)
 
 
+@router.post("/send-code", response_model=SendCodeResponse, summary="发送邮箱验证码（已登录）")
+def send_code(
+    request: Request,
+    current_member: Member = Depends(get_current_member),
+    service: MemberAuthService = Depends(get_member_auth_service),
+) -> SendCodeResponse:
+    """向**当前登录账号**的邮箱发送「修改密码」验证码，无需传邮箱，防止给他人邮箱发码。
+
+    未配置 SMTP（`MAIL_ENABLED=false`）时不会真实发信，验证码会写入服务端日志；
+    开启 `EMAIL_CODE_DEBUG_RETURN` 且 DEBUG=true 时会在响应 `debug_code` 中回显，便于本地联调。
+    """
+    data = service.send_code_to_member(current_member, get_client_ip(request))
+    return SendCodeResponse(**data)
+
+
 @router.post("/profile/change-password", response_model=MessageResponse, summary="修改我的密码")
 def change_password(
     payload: MemberChangePassword,
     current_member: Member = Depends(get_current_member),
     service: MemberAuthService = Depends(get_member_auth_service),
 ) -> MessageResponse:
-    service.change_password(current_member, payload.old_password, payload.new_password)
-    return MessageResponse(message="密码修改成功")
+    """流程：先调 `POST /member/send-code` 拿邮箱验证码，再提交「验证码 + 新密码 + 确认密码」。
+
+    入参 `confirm_password` 需与 `new_password` 一致；验证码一次性使用。
+    """
+    service.change_password(current_member, payload.code, payload.new_password)
+    return MessageResponse(message="密码修改成功，请使用新密码重新登录")

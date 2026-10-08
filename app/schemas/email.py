@@ -12,7 +12,8 @@ class SendCodeRequest(BaseModel):
 
     email: EmailStr = Field(..., description="目标邮箱")
     scene: EmailScene = Field(
-        default=EmailScene.REGISTER, description="场景：register / reset_password"
+        default=EmailScene.REGISTER,
+        description="场景：register / reset_password（已登录改密码请用 /member/send-code，不走这里）",
     )
 
 

@@ -16,11 +16,17 @@ def _send_code(client, email: str, scene: str) -> str:
     return code
 
 
-def _register(client, email: str, password: str = "member123", nickname: str = "") -> dict:
+def _register(client, email: str, password: str = "member123", confirm_password: str = "") -> dict:
+    """注册并返回会员信息；confirm_password 留空时默认与 password 一致。"""
     code = _send_code(client, email, "register")
     response = client.post(
         f"{MEMBER_API}/auth/register",
-        json={"email": email, "code": code, "password": password, "nickname": nickname},
+        json={
+            "email": email,
+            "code": code,
+            "password": password,
+            "confirm_password": confirm_password or password,
+        },
     )
     assert response.status_code == 201, response.text
     return response.json()
@@ -30,6 +36,15 @@ def _member_headers(client, email: str, password: str = "member123") -> dict:
     response = client.post(f"{MEMBER_API}/auth/login", json={"email": email, "password": password})
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+def _send_member_code(client, headers: dict) -> str:
+    """登录状态下发送「修改密码」验证码（邮箱取当前账号），返回明文验证码。"""
+    response = client.post(f"{MEMBER_API}/send-code", headers=headers)
+    assert response.status_code == 200, response.text
+    code = response.json().get("debug_code")
+    assert code, "测试环境应回显 debug_code"
+    return code
 
 
 # ==================== 注册流程 ====================
@@ -64,8 +79,12 @@ def test_send_code_cooldown(client, monkeypatch):
 
 
 def test_register_and_duplicate(client):
-    member = _register(client, "register01@example.com", nickname="小明")
-    assert member["nickname"] == "小明"
+    from app.core.config import settings
+
+    member = _register(client, "register01@example.com")
+    # 昵称由系统自动生成，头像使用默认头像
+    assert member["nickname"], "注册后应自动生成默认昵称"
+    assert member["avatar"] == settings.DEFAULT_AVATAR
     assert member["email_verified"] is True
     assert member["gender"] == "unknown"
     assert member["is_active"] is True
@@ -78,11 +97,32 @@ def test_register_and_duplicate(client):
     assert code.status_code == 409
 
 
+def test_register_password_mismatch(client):
+    """两次密码不一致 -> 422。"""
+    code = _send_code(client, "mismatch01@example.com", "register")
+    response = client.post(
+        f"{MEMBER_API}/auth/register",
+        json={
+            "email": "mismatch01@example.com",
+            "code": code,
+            "password": "member123",
+            "confirm_password": "member456",
+        },
+    )
+    assert response.status_code == 422
+    assert "两次输入的密码不一致" in response.text
+
+
 def test_register_wrong_code(client):
     client.post(f"{MEMBER_API}/auth/send-code", json={"email": "badcode@example.com", "scene": "register"})
     response = client.post(
         f"{MEMBER_API}/auth/register",
-        json={"email": "badcode@example.com", "code": "000000", "password": "member123"},
+        json={
+            "email": "badcode@example.com",
+            "code": "000000",
+            "password": "member123",
+            "confirm_password": "member123",
+        },
     )
     assert response.status_code == 400
     assert "验证码" in response.json()["message"]
@@ -92,7 +132,12 @@ def test_register_weak_password_rejected(client):
     code = _send_code(client, "weak@example.com", "register")
     response = client.post(
         f"{MEMBER_API}/auth/register",
-        json={"email": "weak@example.com", "code": code, "password": "12345678"},
+        json={
+            "email": "weak@example.com",
+            "code": code,
+            "password": "12345678",
+            "confirm_password": "12345678",
+        },
     )
     assert response.status_code == 422
 
@@ -198,20 +243,49 @@ def test_change_password(client):
     _register(client, "chpwd01@example.com")
     headers = _member_headers(client, "chpwd01@example.com")
 
+    # 未登录不能获取改密码验证码
+    assert client.post(f"{MEMBER_API}/send-code").status_code == 401
+
+    # 公开发送验证码接口不接受 change_password 场景（必须走登录态）
+    public = client.post(
+        f"{MEMBER_API}/auth/send-code",
+        json={"email": "chpwd01@example.com", "scene": "change_password"},
+    )
+    assert public.status_code == 400
+
+    code = _send_member_code(client, headers)
+
+    # 验证码错误 -> 400
     wrong = client.post(
         f"{MEMBER_API}/profile/change-password",
         headers=headers,
-        json={"old_password": "wrong123", "new_password": "newpass123"},
+        json={"code": "000000", "new_password": "newpass123", "confirm_password": "newpass123"},
     )
     assert wrong.status_code == 400
+
+    # 两次密码不一致 -> 422
+    mismatch = client.post(
+        f"{MEMBER_API}/profile/change-password",
+        headers=headers,
+        json={"code": code, "new_password": "newpass123", "confirm_password": "other123"},
+    )
+    assert mismatch.status_code == 422
 
     ok = client.post(
         f"{MEMBER_API}/profile/change-password",
         headers=headers,
-        json={"old_password": "member123", "new_password": "newpass123"},
+        json={"code": code, "new_password": "newpass123", "confirm_password": "newpass123"},
     )
-    assert ok.status_code == 200
+    assert ok.status_code == 200, ok.text
     assert _member_headers(client, "chpwd01@example.com", "newpass123")
+
+    # 验证码一次性：重复使用 -> 400
+    reuse = client.post(
+        f"{MEMBER_API}/profile/change-password",
+        headers=headers,
+        json={"code": code, "new_password": "another123", "confirm_password": "another123"},
+    )
+    assert reuse.status_code == 400
 
 
 # ==================== 重置密码 ====================
@@ -222,15 +296,38 @@ def test_reset_password_flow(client):
     # 错误验证码
     bad = client.post(
         f"{MEMBER_API}/auth/reset-password",
-        json={"email": "reset01@example.com", "code": "000000", "new_password": "brand123456"},
+        json={
+            "email": "reset01@example.com",
+            "code": "000000",
+            "new_password": "brand123456",
+            "confirm_password": "brand123456",
+        },
     )
     assert bad.status_code == 400
+
+    # 两次密码不一致 -> 422
+    mismatch = client.post(
+        f"{MEMBER_API}/auth/reset-password",
+        json={
+            "email": "reset01@example.com",
+            "code": "000000",
+            "new_password": "brand123456",
+            "confirm_password": "brand654321",
+        },
+    )
+    assert mismatch.status_code == 422
+    assert "两次输入的密码不一致" in mismatch.text
 
     # 重新获取后正确重置
     code = _send_code(client, "reset01@example.com", "reset_password")
     ok = client.post(
         f"{MEMBER_API}/auth/reset-password",
-        json={"email": "reset01@example.com", "code": code, "new_password": "brand123456"},
+        json={
+            "email": "reset01@example.com",
+            "code": code,
+            "new_password": "brand123456",
+            "confirm_password": "brand123456",
+        },
     )
     assert ok.status_code == 200
     assert _member_headers(client, "reset01@example.com", "brand123456")
@@ -238,7 +335,7 @@ def test_reset_password_flow(client):
 
 # ==================== 后台会员管理 ====================
 def test_admin_member_management(client, auth_headers):
-    member = _register(client, "managed01@example.com", nickname="待管理")
+    member = _register(client, "managed01@example.com")
     member_id = member["id"]
 
     # 列表 + 搜索

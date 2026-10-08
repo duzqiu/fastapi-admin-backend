@@ -18,6 +18,7 @@ class EmailScene(str, enum.Enum):
     REGISTER = "register"
     RESET_PASSWORD = "reset_password"
     CHANGE_EMAIL = "change_email"
+    CHANGE_PASSWORD = "change_password"
 
 
 class EmailCode(PKMixin, Base):

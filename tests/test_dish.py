@@ -20,7 +20,12 @@ def _member_headers(client, email: str = "diner@example.com") -> dict:
         ).json()["debug_code"]
         client.post(
             f"{API}/member/auth/register",
-            json={"email": email, "code": code, "password": "member123"},
+            json={
+                "email": email,
+                "code": code,
+                "password": "member123",
+                "confirm_password": "member123",
+            },
         )
         login = client.post(
             f"{API}/member/auth/login", json={"email": email, "password": "member123"}

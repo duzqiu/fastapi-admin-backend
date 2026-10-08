@@ -308,6 +308,7 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
 | `EMAIL_CODE_RESEND_SECONDS` | 60 | 同一邮箱 + 场景的重发冷却时间 |
 | `EMAIL_CODE_MAX_ATTEMPTS` | 5 | 同一验证码最多允许校验失败次数 |
 | `EMAIL_CODE_DEBUG_RETURN` | true | 是否在响应 `debug_code` 回显验证码（**生产必须 false**） |
+| `DEFAULT_AVATAR` | /api/v1/assets/default-avatar.svg | 会员注册后的默认头像地址（内置资源，由 `app/static` 托管） |
 | `UPLOAD_DIR` | ./data/uploads | 上传目录（相对路径以项目根目录为基准） |
 | `IMAGE_MAX_SIZE_MB` | 5 | 图片（会员头像 / 菜品图片）大小上限 |
 | `IMAGE_ALLOWED_EXTENSIONS` | jpg,jpeg,png,webp,gif | 允许的图片后缀 |
@@ -363,17 +364,18 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
 | POST | `/member/auth/send-code` | 发送邮箱验证码（`scene=register` / `reset_password`） | 公开 |
-| POST | `/member/auth/register` | 邮箱验证码注册，成功即完成邮箱验证 | 公开 |
+| POST | `/member/auth/register` | 邮箱验证码注册（入参 `email` `code` `password` `confirm_password`），成功即完成邮箱验证，并自动生成默认昵称与默认头像 | 公开 |
 | POST | `/member/auth/login` | 邮箱 + 密码登录，返回 `scope=member` 令牌 | 公开 |
 | POST | `/member/auth/token` | OAuth2 表单登录（Swagger 调试用） | 公开 |
 | POST | `/member/auth/refresh` | 刷新会员令牌 | 公开 |
-| POST | `/member/auth/reset-password` | 忘记密码：邮箱验证码 + 新密码 | 公开 |
+| POST | `/member/auth/reset-password` | 忘记密码：入参 `email` `code` `new_password` `confirm_password` | 公开 |
 | GET | `/member/auth/me` | 当前登录会员 | 会员 |
 | POST | `/member/auth/logout` | 退出登录 | 会员 |
 | GET | `/member/profile` | 查看我的资料 | 会员 |
 | PUT | `/member/profile` | 修改昵称 / 头像 / 性别 / 生日 / 手机号 / 简介 | 会员 |
 | POST | `/member/profile/avatar` | 上传头像（multipart，≤2MB，jpg/png/webp/gif） | 会员 |
-| POST | `/member/profile/change-password` | 修改密码 | 会员 |
+| POST | `/member/send-code` | 已登录获取「修改密码」邮箱验证码（邮箱取当前账号，无需传参） | 会员 |
+| POST | `/member/profile/change-password` | 修改密码：入参 `code` `new_password` `confirm_password` | 会员 |
 
 ### 会员管理（后台）`/members`（仅管理员）
 
@@ -439,8 +441,9 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
 ```
 ① 注册
    前端  ──POST /member/auth/send-code {email, scene:"register"}──▶  校验邮箱未被注册 → 生成 6 位码 → 发信
-   前端  ──POST /member/auth/register  {email, code, password}──▶  校验验证码 → 创建会员（email_verified=true）
-                                                                  └ 昵称留空时自动生成
+   前端  ──POST /member/auth/register  {email, code, password, confirm_password}──▶
+                                      校验两次密码一致 → 校验验证码 → 创建会员（email_verified=true）
+                                                                  └ 自动生成默认昵称 + 写入默认头像
 
 ② 登录
    前端  ──POST /member/auth/login {email, password}──▶  access_token + refresh_token（scope=member）
@@ -449,9 +452,15 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
    PUT  /member/profile        昵称 / 头像地址 / 性别 / 生日 / 手机号 / 简介
    POST /member/profile/avatar 上传头像文件 → 返回可访问 URL 并自动写入头像字段
 
-④ 忘记密码
+④ 忘记密码（未登录）
    POST /member/auth/send-code      {email, scene:"reset_password"}  要求邮箱已注册
-   POST /member/auth/reset-password {email, code, new_password}      校验通过后更新密码
+   POST /member/auth/reset-password {email, code, new_password, confirm_password}  两次密码一致才更新
+
+⑤ 修改密码（已登录）
+   POST /member/send-code                    带会员令牌 → 向当前账号邮箱发码（scene=change_password）
+   POST /member/profile/change-password       {code, new_password, confirm_password}
+                                              校验验证码 → 校验两次密码一致 → 更新密码（验证码一次性）
+                                              └ 新密码不能与当前密码相同
 ```
 
 ### 8.3 邮箱验证码机制

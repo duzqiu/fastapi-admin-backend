@@ -8,6 +8,7 @@
 """
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -69,6 +70,15 @@ def create_app() -> FastAPI:
         settings.upload_url_prefix,
         StaticFiles(directory=str(upload_dir)),
         name="uploads",
+    )
+
+    # 挂载内置静态资源（默认头像等）。同样挂在 API 前缀下，便于复用 /api 代理规则
+    assets_dir = Path(__file__).resolve().parent / "static"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    application.mount(
+        f"{settings.API_V1_PREFIX}/assets",
+        StaticFiles(directory=str(assets_dir)),
+        name="assets",
     )
 
     @application.get("/", tags=["系统"], summary="服务根路径")

@@ -84,6 +84,10 @@ class Settings(BaseSettings):
     # 非生产环境把验证码回显在接口响应里，方便前端联调（生产务必置 false）
     EMAIL_CODE_DEBUG_RETURN: bool = True
 
+    # ---------- 用户中心（会员）：默认头像 ----------
+    # 注册成功但尚未上传头像时写入该地址，由 app/static 下的内置资源托管
+    DEFAULT_AVATAR: str = "/api/v1/assets/default-avatar.svg"
+
     # ---------- 图片上传（会员头像 / 菜品图片） ----------
     # 相对路径以「项目根目录」为基准
     UPLOAD_DIR: str = "./data/uploads"

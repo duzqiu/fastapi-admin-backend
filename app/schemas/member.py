@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from app.models.member import MemberGender
 from app.schemas.common import ORMBaseModel
@@ -21,19 +21,35 @@ def _validate_password(value: str) -> str:
     return value
 
 
+def _validate_password_match(password: str, confirm_password: str) -> None:
+    """校验「密码」与「确认密码」一致（用于注册、重置密码等场景）。"""
+    if password != confirm_password:
+        raise ValueError("两次输入的密码不一致")
+
+
 # ==================== 认证相关 ====================
 class MemberRegister(BaseModel):
-    """会员注册入参（邮箱验证码方式）。"""
+    """会员注册入参（邮箱验证码方式）。
+
+    注册成功后系统自动生成默认昵称与默认头像，可在个人中心自行修改。
+    """
 
     email: EmailStr = Field(..., description="注册邮箱")
     code: str = Field(..., min_length=4, max_length=10, description="邮箱验证码")
     password: str = Field(..., min_length=PASSWORD_MIN, max_length=PASSWORD_MAX, description="密码")
-    nickname: str = Field(default="", max_length=50, description="昵称，留空自动生成")
+    confirm_password: str = Field(
+        ..., min_length=PASSWORD_MIN, max_length=PASSWORD_MAX, description="确认密码，需与密码一致"
+    )
 
     @field_validator("password")
     @classmethod
     def check_password(cls, value: str) -> str:
         return _validate_password(value)
+
+    @model_validator(mode="after")
+    def check_password_match(self) -> "MemberRegister":
+        _validate_password_match(self.password, self.confirm_password)
+        return self
 
 
 class MemberLogin(BaseModel):
@@ -49,23 +65,42 @@ class MemberResetPassword(BaseModel):
     email: EmailStr
     code: str = Field(..., min_length=4, max_length=10)
     new_password: str = Field(..., min_length=PASSWORD_MIN, max_length=PASSWORD_MAX)
+    confirm_password: str = Field(
+        ..., min_length=PASSWORD_MIN, max_length=PASSWORD_MAX, description="确认密码，需与新密码一致"
+    )
 
     @field_validator("new_password")
     @classmethod
     def check_password(cls, value: str) -> str:
         return _validate_password(value)
+
+    @model_validator(mode="after")
+    def check_password_match(self) -> "MemberResetPassword":
+        _validate_password_match(self.new_password, self.confirm_password)
+        return self
 
 
 class MemberChangePassword(BaseModel):
-    """登录状态下修改密码。"""
+    """登录状态下修改密码：邮箱验证码 + 新密码 + 确认密码。
 
-    old_password: str = Field(..., min_length=1, max_length=PASSWORD_MAX)
-    new_password: str = Field(..., min_length=PASSWORD_MIN, max_length=PASSWORD_MAX)
+    验证码由 `POST /member/send-code` 发送到当前登录账号的邮箱。
+    """
+
+    code: str = Field(..., min_length=4, max_length=10, description="邮箱验证码")
+    new_password: str = Field(..., min_length=PASSWORD_MIN, max_length=PASSWORD_MAX, description="新密码")
+    confirm_password: str = Field(
+        ..., min_length=PASSWORD_MIN, max_length=PASSWORD_MAX, description="确认密码，需与新密码一致"
+    )
 
     @field_validator("new_password")
     @classmethod
     def check_password(cls, value: str) -> str:
         return _validate_password(value)
+
+    @model_validator(mode="after")
+    def check_password_match(self) -> "MemberChangePassword":
+        _validate_password_match(self.new_password, self.confirm_password)
+        return self
 
 
 class MemberRefresh(BaseModel):

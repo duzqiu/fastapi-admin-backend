@@ -76,8 +76,17 @@ class MemberAuthService:
             raise BusinessError("该邮箱尚未注册")
         if scene == EmailScene.CHANGE_EMAIL and registered:
             raise ConflictError("该邮箱已被其他账号使用")
+        if scene == EmailScene.CHANGE_PASSWORD:
+            # 改密码场景必须绑定登录态，邮箱只能取当前账号，避免给任意邮箱发码
+            raise BusinessError("修改密码请在登录状态下调用 /member/send-code 获取验证码")
 
         return self.codes.send_code(email, scene.value, request_ip)
+
+    def send_code_to_member(self, member: Member, request_ip: str = "") -> Dict[str, Any]:
+        """已登录状态发送「修改密码」验证码：邮箱固定为当前账号邮箱，无需前端传。"""
+        return self.codes.send_code(
+            member.email.lower(), EmailScene.CHANGE_PASSWORD.value, request_ip
+        )
 
     # ------------------------- 注册 / 登录 -------------------------
     def register(self, payload: MemberRegister, request_ip: str = "") -> Member:
@@ -93,7 +102,8 @@ class MemberAuthService:
         member = self.members.create(
             email=email,
             hashed_password=hash_password(payload.password),
-            nickname=(payload.nickname or "").strip() or self._default_nickname(email),
+            nickname=self._default_nickname(email),
+            avatar=settings.DEFAULT_AVATAR,
             gender=MemberGender.UNKNOWN.value,
             is_active=True,
             email_verified=True,
@@ -145,12 +155,13 @@ class MemberAuthService:
         self.db.add(member)
         self.db.commit()
 
-    def change_password(self, member: Member, old_password: str, new_password: str) -> None:
-        """登录状态下自助修改密码。"""
-        if not verify_password(old_password, member.hashed_password):
-            raise BusinessError("原密码不正确")
-        if old_password == new_password:
-            raise BusinessError("新密码不能与原密码相同")
+    def change_password(self, member: Member, code: str, new_password: str) -> None:
+        """登录状态下自助修改密码：邮箱验证码 + 新密码。"""
+        # 校验验证码（失败会消耗尝试次数；校验通过后标记已使用）
+        self.codes.verify(member.email.lower(), EmailScene.CHANGE_PASSWORD.value, code)
+
+        if verify_password(new_password, member.hashed_password):
+            raise BusinessError("新密码不能与当前密码相同")
 
         member.hashed_password = hash_password(new_password)
         self.db.add(member)
