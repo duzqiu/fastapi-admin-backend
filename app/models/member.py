@@ -1,9 +1,12 @@
-"""会员（用户中心注册用户）ORM 模型。
+"""用户中心注册用户 ORM 模型。
 
-为什么单独建表而不是复用 `users`：
-- `users` 是后台账号（B 端，由管理员创建、带角色权限）；
-- `members` 是用户中心自助注册的 C 端用户（邮箱注册、无后台权限）；
-- 两者生命周期、字段、令牌作用域完全不同，分开可避免会员令牌越权访问后台接口。
+表名规范：`一级功能_二级功能_功能`
+    member_account_info         ->  用户中心_账号_信息（本模型）
+    member_account_email_code   ->  用户中心_账号_邮箱验证码
+    system_auth_admin_user      ->  系统_认证_后台账号（见 app/models/user.py）
+
+为什么要拆成两张表：后台账号与用户中心注册用户的字段、生命周期、令牌作用域
+完全不同，分开建模可避免用户中心令牌越权访问后台接口。
 """
 
 import enum
@@ -28,10 +31,19 @@ class MemberGender(str, enum.Enum):
 class Member(PKMixin, TimestampMixin, Base):
     """用户中心会员表。"""
 
-    __tablename__ = "members"
-    __table_args__ = (Index("ix_members_active_created", "is_active", "created_at"),)
+    __tablename__ = "member_account_info"
+    __table_args__ = (
+        Index("ix_member_account_info_active_created", "is_active", "created_at"),
+    )
 
     # ---------- 注册与登录 ----------
+    member_no: Mapped[str] = mapped_column(
+        String(6),
+        unique=True,
+        index=True,
+        nullable=False,
+        comment="会员编号（注册时随机生成的 6 位唯一 ID）",
+    )
     email: Mapped[str] = mapped_column(
         String(120), unique=True, index=True, nullable=False, comment="注册邮箱（登录账号）"
     )

@@ -11,7 +11,7 @@
     python scripts/migrate_database.py --target "postgresql+psycopg://user:pwd@127.0.0.1:5432/admin_db" --create-tables --truncate
 
     # 指定源库，并显式指定迁移哪些表
-    python scripts/migrate_database.py --source "sqlite:///./data/app.db" --target "mysql+pymysql://root:pwd@127.0.0.1:3306/admin_db?charset=utf8mb4" --create-tables --truncate --tables users,members,dishes
+    python scripts/migrate_database.py --source "sqlite:///./data/app.db" --target "mysql+pymysql://root:pwd@127.0.0.1:3306/admin_db?charset=utf8mb4" --create-tables --truncate --tables system_auth_admin_user,member_account_info,dish_base_info
 
     # 只校验两个库的数据行数是否一致
     python scripts/migrate_database.py --target "..." --verify-only

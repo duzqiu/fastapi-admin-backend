@@ -1,7 +1,21 @@
 """通用工具函数。"""
 
+import secrets
 from datetime import date, datetime, time, timezone
 from typing import Optional
+
+# 会员编号长度（对外展示的短 ID）
+MEMBER_NO_LENGTH = 6
+
+
+def generate_member_no(length: int = MEMBER_NO_LENGTH) -> str:
+    """生成指定长度的随机数字编号。
+
+    首位不为 0，保证显示出来的位数固定（例如 6 位时范围是 100000-999999）。
+    这里只负责「随机」，唯一性由服务层的查重重试 + 数据库唯一索引共同保证。
+    """
+    smallest = 10 ** (length - 1)
+    return str(smallest + secrets.randbelow(9 * smallest))
 
 
 def utcnow() -> datetime:

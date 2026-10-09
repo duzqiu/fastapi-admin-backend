@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.logging import logger
 from app.core.security import hash_password
-from app.core.utils import utcnow
+from app.core.utils import generate_member_no, utcnow
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models import (  # noqa: F401  确保模型已注册
@@ -91,13 +91,24 @@ def create_initial_superuser(db: Session) -> None:
     )
 
 
+def _unique_member_no(taken: set) -> str:
+    """为演示会员生成互不重复的随机编号（与注册流程生成规则一致）。"""
+    while True:
+        candidate = generate_member_no()
+        if candidate not in taken:
+            taken.add(candidate)
+            return candidate
+
+
 def create_initial_members(db: Session) -> None:
     """写入演示会员（表为空时才写入）。"""
     if db.execute(select(Member)).scalars().first():
         return
+    taken_no: set = set()
     for item in DEFAULT_MEMBERS:
         db.add(
             Member(
+                member_no=_unique_member_no(taken_no),
                 email=item["email"],
                 nickname=item["nickname"],
                 gender=item["gender"],

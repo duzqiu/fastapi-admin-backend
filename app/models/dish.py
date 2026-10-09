@@ -7,6 +7,13 @@
                           │
                           n
                        DishSpec（套餐 / 规格，承载价格、库存、销量与售卖规则）
+
+表名规范：`一级功能_二级功能_功能`
+    dish_base_info          ->  菜品_基础_信息（菜品主表）
+    dish_base_category      ->  菜品_基础_分类
+    dish_base_tag           ->  菜品_基础_标签
+    dish_base_spec          ->  菜品_基础_套餐规格
+    dish_base_tag_relation  ->  菜品_基础_标签关联（菜品与标签的多对多中间表）
 """
 
 import enum
@@ -42,17 +49,17 @@ class DishStatus(str, enum.Enum):
 
 # 菜品与标签的多对多关联表
 dish_tag_links = Table(
-    "dish_tag_links",
+    "dish_base_tag_relation",
     Base.metadata,
-    Column("dish_id", ForeignKey("dishes.id", ondelete="CASCADE"), primary_key=True),
-    Column("tag_id", ForeignKey("dish_tags.id", ondelete="CASCADE"), primary_key=True),
+    Column("dish_id", ForeignKey("dish_base_info.id", ondelete="CASCADE"), primary_key=True),
+    Column("tag_id", ForeignKey("dish_base_tag.id", ondelete="CASCADE"), primary_key=True),
 )
 
 
 class DishCategory(PKMixin, TimestampMixin, Base):
     """菜品分类。"""
 
-    __tablename__ = "dish_categories"
+    __tablename__ = "dish_base_category"
 
     name: Mapped[str] = mapped_column(
         String(50), unique=True, index=True, nullable=False, comment="分类名称"
@@ -74,7 +81,7 @@ class DishTag(PKMixin, TimestampMixin, Base):
     后台仍可正常查看、编辑并继续挂在菜品上（不影响历史数据）。
     """
 
-    __tablename__ = "dish_tags"
+    __tablename__ = "dish_base_tag"
 
     name: Mapped[str] = mapped_column(
         String(30), unique=True, index=True, nullable=False, comment="标签名称"
@@ -96,8 +103,8 @@ class DishTag(PKMixin, TimestampMixin, Base):
 class Dish(PKMixin, TimestampMixin, Base):
     """菜品（菜单上的一道菜）。"""
 
-    __tablename__ = "dishes"
-    __table_args__ = (Index("ix_dishes_status_sort", "status", "sort"),)
+    __tablename__ = "dish_base_info"
+    __table_args__ = (Index("ix_dish_base_info_status_sort", "status", "sort"),)
 
     name: Mapped[str] = mapped_column(String(100), index=True, nullable=False, comment="菜名")
     description: Mapped[str] = mapped_column(Text, default="", comment="菜品描述")
@@ -115,7 +122,7 @@ class Dish(PKMixin, TimestampMixin, Base):
     sort: Mapped[int] = mapped_column(Integer, default=0, comment="排序值")
 
     category_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("dish_categories.id", ondelete="SET NULL"),
+        ForeignKey("dish_base_category.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
         comment="所属分类",
@@ -162,10 +169,13 @@ class DishSpec(PKMixin, TimestampMixin, Base):
     价格、库存、销量与售卖规则都挂在套餐上。
     """
 
-    __tablename__ = "dish_specs"
+    __tablename__ = "dish_base_spec"
 
     dish_id: Mapped[int] = mapped_column(
-        ForeignKey("dishes.id", ondelete="CASCADE"), index=True, nullable=False, comment="所属菜品"
+        ForeignKey("dish_base_info.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+        comment="所属菜品",
     )
     name: Mapped[str] = mapped_column(String(50), nullable=False, comment="套餐 / 规格名称")
     description: Mapped[str] = mapped_column(String(200), default="", comment="套餐说明")

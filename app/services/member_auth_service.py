@@ -19,7 +19,7 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.core.utils import utcnow
+from app.core.utils import generate_member_no, utcnow
 from app.models.email_code import EmailScene
 from app.models.member import Member, MemberGender
 from app.repositories.member_repository import MemberRepository
@@ -29,6 +29,9 @@ from app.services.email_code_service import EmailCodeService
 
 class MemberAuthService:
     """用户中心认证业务逻辑。"""
+
+    # 会员编号查重重试次数（900000 的编号空间下几乎用不到第二次）
+    MEMBER_NO_MAX_ATTEMPTS = 10
 
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -53,6 +56,18 @@ class MemberAuthService:
         """注册未填昵称时，用邮箱前缀 + 随机数字生成一个不重复的昵称。"""
         prefix = email.split("@")[0][:12] or "user"
         return f"{prefix}_{secrets.randbelow(9000) + 1000}"
+
+    def _generate_member_no(self) -> str:
+        """生成一个未被占用的 6 位随机会员编号。
+
+        900000 的编号空间下顺序重试基本不会发生第二次；数据库层面还有唯一索引兜底，
+        即使极端并发下撞号，也不会写入重复编号。
+        """
+        for _ in range(self.MEMBER_NO_MAX_ATTEMPTS):
+            candidate = generate_member_no()
+            if not self.members.member_no_taken(candidate):
+                return candidate
+        raise BusinessError("会员编号生成失败，请稍后重试")
 
     def _get_active_member(self, email: str) -> Member:
         member = self.members.get_by_email(email.lower())
@@ -90,7 +105,10 @@ class MemberAuthService:
 
     # ------------------------- 注册 / 登录 -------------------------
     def register(self, payload: MemberRegister, request_ip: str = "") -> Member:
-        """邮箱验证码注册。"""
+        """邮箱验证码注册。
+
+        注册成功时会随机生成一个 6 位、全局不重复的会员编号（`member_no`）。
+        """
         email = str(payload.email).lower()
 
         if self.members.email_taken(email):
@@ -100,6 +118,7 @@ class MemberAuthService:
         self.codes.verify(email, EmailScene.REGISTER.value, payload.code)
 
         member = self.members.create(
+            member_no=self._generate_member_no(),
             email=email,
             hashed_password=hash_password(payload.password),
             nickname=self._default_nickname(email),

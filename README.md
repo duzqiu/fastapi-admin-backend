@@ -36,15 +36,17 @@
 | 能力 | 说明 |
 | --- | --- |
 | 后台账号认证鉴权 | 账号密码登录、JWT（access + refresh）、角色权限（admin / editor / user） |
-| 用户中心（会员） | 邮箱验证码注册、登录、忘记密码、个人资料（昵称/头像/性别/生日/简介）、头像上传 |
+| 用户中心（会员） | 邮箱验证码注册（自动分配 6 位唯一会员编号）、登录、忘记密码、个人资料（昵称/头像/性别/生日/简介）、头像上传 |
 | 点菜菜单与订单 | 菜品（菜名/图片/价格/库存）、**多套餐与售卖规则**（起购 / 限购 / 每日限量 / 供应时段）、分类与标签、**销量统计**、下单与订单管理闭环 |
 | 通用后台 CRUD | 后台用户管理、**会员管理**（查看 / 修改 / 启禁用 / 重置密码 / 删除）、菜品管理、订单管理 |
 | 分层基础设施 | 统一配置、统一异常、统一分页、请求日志、跨域、邮件、文件上传、初始化与迁移脚本 |
 
 设计目标：**高内聚**（每种职能只出现在固定的一层里）、**低耦合**（上层依赖下层接口，替换任一层的实现不影响其他层）。
 
-> **两套账号体系互不通用**：`users` 是后台账号（管理员创建、带权限），`members` 是用户中心自助注册的会员（邮箱注册、无后台权限）。
-> 两者签发的 JWT 带不同的 `scope`（`staff` / `member`），会员令牌无法访问任何后台接口，后台令牌也无法访问用户中心接口。
+> **两套账号体系互不通用**：`system_auth_admin_user` 表是**后台账号**（管理员创建、带权限），`member_account_info` 表是**用户中心注册用户**（邮箱自助注册、无后台权限）。
+> 两者签发的 JWT 带不同的 `scope`（`staff` / `member`），用户中心令牌无法访问任何后台接口，后台令牌也无法访问用户中心接口。
+>
+> 表名遵循统一的 `一级功能_二级功能_功能` 规范（见 [11.3](#113-表命名规范与改名)），后台账号与前台用户从表名上一眼可辨。
 
 ---
 
@@ -121,7 +123,7 @@ fastapi-admin-backend/
 │   │   ├── mailer.py                   邮件发送（SMTP / 未启用时只打日志），验证码邮件模板
 │   │   ├── storage.py                  通用图片上传：后缀/大小/魔术字节校验、落盘、旧文件清理
 │   │   ├── logging.py                  日志格式与初始化
-│   │   └── utils.py                    通用工具（UTC 时间戳、本地时间、供应时段判定）
+│   │   └── utils.py                    通用工具（UTC 时间戳、本地时间、供应时段判定、6 位随机编号）
 │   │
 │   ├── db/                             ★ 数据访问基础设施
 │   │   ├── base.py                     SQLAlchemy DeclarativeBase
@@ -130,8 +132,8 @@ fastapi-admin-backend/
 │   │
 │   ├── models/                         ★ ORM 模型层
 │   │   ├── mixins.py                   主键 / 时间戳 Mixin
-│   │   ├── user.py                     后台账号表 + UserRole 枚举
-│   │   ├── member.py                   用户中心会员表 + MemberGender 枚举（资料字段）
+│   │   ├── user.py                     后台账号表 system_auth_admin_user + UserRole 枚举
+│   │   ├── member.py                   注册用户表 member_account_info（含 6 位唯一编号）+ MemberGender
 │   │   ├── email_code.py               邮箱验证码表 + EmailScene 枚举（场景）
 │   │   ├── dish.py                     菜品域：分类 / 标签 / 菜品 / 套餐规格（含售卖规则）
 │   │   ├── dish_order.py               订单域：订单、订单明细、状态流转规则
@@ -364,7 +366,7 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
 | POST | `/member/auth/send-code` | 发送邮箱验证码（`scene=register` / `reset_password`） | 公开 |
-| POST | `/member/auth/register` | 邮箱验证码注册（入参 `email` `code` `password` `confirm_password`），成功即完成邮箱验证，并自动生成默认昵称与默认头像 | 公开 |
+| POST | `/member/auth/register` | 邮箱验证码注册（入参 `email` `code` `password` `confirm_password`），成功即完成邮箱验证，并**随机生成 6 位唯一会员编号**、自动生成默认昵称与默认头像 | 公开 |
 | POST | `/member/auth/login` | 邮箱 + 密码登录，返回 `scope=member` 令牌 | 公开 |
 | POST | `/member/auth/token` | OAuth2 表单登录（Swagger 调试用） | 公开 |
 | POST | `/member/auth/refresh` | 刷新会员令牌 | 公开 |
@@ -381,7 +383,7 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/members` | 分页列表，支持 `keyword` `gender` `is_active` `email_verified` `registered_after` `registered_before` |
+| GET | `/members` | 分页列表，支持 `keyword`（会员编号 / 邮箱 / 昵称 / 手机号）`gender` `is_active` `email_verified` `registered_after` `registered_before` |
 | GET | `/members/stats` | 会员统计（总数 / 启用 / 禁用 / 已验证 / 近 7 天新增 / 性别分布） |
 | GET | `/members/{id}` | 会员详情（含昵称、头像、性别、生日、年龄、手机号、简介） |
 | PUT | `/members/{id}` | 修改会员资料与启用状态 |
@@ -420,18 +422,18 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
 
 ## 八、用户中心（会员体系）
 
-### 8.1 为什么单独建一张 `members` 表
+### 8.1 为什么单独建一张 `member_account_info` 表
 
-后台已有的 `users` 是**后台账号**（B 端）：由管理员创建、带角色权限、不能自助注册。
-用户中心面对的是**C 端注册用户**，字段、生命周期、权限边界都不同，因此独立建模：
+后台账号表（`system_auth_admin_user`）是 **B 端**：由管理员创建、带角色权限、不能自助注册。
+用户中心面对的是 **C 端注册用户**，字段、生命周期、权限边界都不同，因此独立建模为 `member_account_info` 表：
 
-| 维度 | `users`（后台账号） | `members`（用户中心会员） |
+| 维度 | `system_auth_admin_user`（后台账号） | `member_account_info`（用户中心注册用户） |
 | --- | --- | --- |
 | 创建方式 | 管理员在后台创建 | 用户自助邮箱注册 |
 | 登录账号 | 用户名 | 邮箱 |
 | 权限 | admin / editor / user | 无后台权限，仅能操作自己的资料 |
 | 令牌 `scope` | `staff` | `member` |
-| 头衔/资料 | 昵称、角色、启用状态 | 昵称、头像、性别、生日、手机号、简介 |
+| 头衔/资料 | 昵称、角色、启用状态 | 6 位会员编号、昵称、头像、性别、生日、手机号、简介 |
 
 **令牌隔离**：两个作用域的 JWT 互不通用。会员令牌访问 `/users`、`/members` 等后台接口会直接返回 401
 （错误码 40104「令牌使用范围不正确」），后台令牌访问 `/member/**` 同样被拒绝。
@@ -443,6 +445,7 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
    前端  ──POST /member/auth/send-code {email, scene:"register"}──▶  校验邮箱未被注册 → 生成 6 位码 → 发信
    前端  ──POST /member/auth/register  {email, code, password, confirm_password}──▶
                                       校验两次密码一致 → 校验验证码 → 创建会员（email_verified=true）
+                                                                  └ 随机生成 6 位唯一会员编号（member_no）
                                                                   └ 自动生成默认昵称 + 写入默认头像
 
 ② 登录
@@ -462,6 +465,22 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
                                               校验验证码 → 校验两次密码一致 → 更新密码（验证码一次性）
                                               └ 新密码不能与当前密码相同
 ```
+
+**会员编号（`member_no`）**
+
+注册成功时自动分配一个 **6 位纯数字**的会员编号，作为对外展示的短 ID（`member_account_info.id` 那种自增主键
+不适合直接给用户看，也不适合作为业务标识）。规则：
+
+| 项 | 说明 |
+| --- | --- |
+| 长度与范围 | 固定 6 位、首位不为 0，取值区间 `100000-999999`（900000 种） |
+| 生成方式 | `secrets.randbelow`（`app/core/utils.generate_member_no`），非伪随机 |
+| 唯一性 | 生成时先查重、重试最多 10 次；`member_account_info.member_no` 上还有**唯一索引**兜底，绝不重复 |
+| 可检索 | 后台 `GET /members?keyword=<编号>` 可按编号精确查找 |
+| 不可修改 | 由系统生成，资料编辑接口（会员端 / 后台）都不接受该字段 |
+
+> 为什么不用主键 `id` 充当 6 位 ID：`dish_order_info.member_id` 等外键依赖自增主键，
+> 改成随机会丢掉有序性、破坏外键语义，且写入时需要处理冲突。新增独立的业务编号是更稳妥的做法。
 
 ### 8.3 邮箱验证码机制
 
@@ -541,6 +560,7 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/member/auth/send-code `
 
 ```
 DishCategory 1 ──── n Dish n ──── n DishTag        （分类：一对多；标签：多对多）
+    （订单表的 member_id 外键指向 user 表 —— 即用户中心注册用户）
                          │
                          1
                          │
@@ -553,12 +573,12 @@ DishOrder   n ──── 1 Member                                 （扫码点
 
 | 模型 | 表 | 说明 |
 | --- | --- | --- |
-| `DishCategory` | `dish_categories` | 菜品分类（热菜 / 凉菜 / 主食 / 饮品…），一个菜品属于一个分类 |
-| `DishTag` | `dish_tags` + `dish_tag_links` | 菜品标签（招牌 / 新品 / 微辣 / 素食…），一个菜品可有多个标签；带 `is_active` 启用状态 |
-| `Dish` | `dishes` | 菜名、图片、价格、库存、**累计销量**、单位、状态、是否推荐、排序 |
-| `DishSpec` | `dish_specs` | 套餐 / 规格（单点 / 单人套餐 / 双人套餐…），承载独立价格、库存、销量与**售卖规则** |
-| `DishOrder` | `dish_orders` | 订单主表：订单号、桌号、会员、状态、总份数、总金额、备注、各状态时间 |
-| `DishOrderItem` | `dish_order_items` | 订单明细：菜名 / 套餐名 / 图片 / 单价快照 + 数量 + 小计 |
+| `DishCategory` | `dish_base_category` | 菜品分类（热菜 / 凉菜 / 主食 / 饮品…），一个菜品属于一个分类 |
+| `DishTag` | `dish_base_tag` + `dish_base_tag_relation` | 菜品标签（招牌 / 新品 / 微辣 / 素食…），一个菜品可有多个标签；带 `is_active` 启用状态 |
+| `Dish` | `dish_base_info` | 菜名、图片、价格、库存、**累计销量**、单位、状态、是否推荐、排序 |
+| `DishSpec` | `dish_base_spec` | 套餐 / 规格（单点 / 单人套餐 / 双人套餐…），承载独立价格、库存、销量与**售卖规则** |
+| `DishOrder` | `dish_order_info` | 订单主表：订单号、桌号、会员、状态、总份数、总金额、备注、各状态时间 |
+| `DishOrderItem` | `dish_order_item` | 订单明细：菜名 / 套餐名 / 图片 / 单价快照 + 数量 + 小计 |
 
 ### 9.2 菜品、套餐与规则
 
@@ -739,7 +759,7 @@ CREATE DATABASE admin_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_c
   --create-tables --truncate
 
 # 只迁移指定的表
-... --tables users,members,dishes,dish_orders
+... --tables system_auth_admin_user,member_account_info,dish_base_info,dish_order_info
 
 # 只校验两个库行数是否一致，不写入任何数据
 ./.venv/Scripts/python.exe scripts/migrate_database.py --target "<目标库URL>" --verify-only
@@ -851,18 +871,76 @@ DROP TABLE IF EXISTS articles;
 
 ```powershell
 # 方式一（推荐，可回溯）：用 Alembic 生成并执行增量迁移
-./.venv/Scripts/python.exe -m alembic revision --autogenerate -m "add dish_tags.is_active"
+./.venv/Scripts/python.exe -m alembic revision --autogenerate -m "add dish_base_tag.is_active"
 ./.venv/Scripts/python.exe -m alembic upgrade head
 ```
 
 ```sql
 -- 方式二：手工执行等价的 DDL
-ALTER TABLE dish_tags ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1;   -- SQLite / PostgreSQL
-ALTER TABLE dish_tags ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1; -- MySQL
+ALTER TABLE dish_base_tag ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1;   -- SQLite / PostgreSQL
+ALTER TABLE dish_base_tag ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1; -- MySQL
 ```
 
-> 本地开发库已经补过这一列（`dish_tags.is_active`，历史数据默认启用）；
+> 本地开发库已经补过这一列（`dish_base_tag.is_active`，历史数据默认启用）；
 > 全新的数据库由 `create_all()` 直接建出带该列的完整表，无需处理。
+
+**带唯一约束 / NOT NULL 的新列（如 `member_account_info.member_no`）**
+
+这类列不能只加 DDL 就完事：`NOT NULL + UNIQUE` 要求历史行都有值且互不重复，
+所以要「加列 → 回填 → 建唯一索引」三步走。SQLite 示例（其他库把索引语法替换即可）：
+
+```python
+# 1) 先加一个带默认值的普通列（SQLite 的 ADD COLUMN 不支持直接加 UNIQUE）
+ALTER TABLE member_account_info ADD COLUMN member_no VARCHAR(6) NOT NULL DEFAULT ''
+
+# 2) 逐行回填：用应用里的生成函数，保证 6 位且互不重复
+from app.core.utils import generate_member_no
+taken = set()
+for row_id, current in 查询所有 (id, member_no):
+    编号 = current if 合法且未占用 else 反复 generate_member_no() 直到未占用
+    UPDATE member_account_info SET member_no = 编号 WHERE id = row_id
+
+# 3) 补上唯一索引（名字与 SQLAlchemy unique=True + index=True 生成的一致）
+CREATE UNIQUE INDEX IF NOT EXISTS ix_member_account_info_member_no
+    ON member_account_info (member_no)
+```
+
+> 本地开发库已完成上述三步（历史用户均已回填唯一编号）；全新数据库由
+> `create_all()` 直接建出 `member_no` 唯一列，无需处理。
+
+### 11.3 表命名规范与改名
+
+**规范：`一级功能_二级功能_功能`** —— 三段拼起来必须能完整说明这张表是什么，
+禁止出现只有一两段的名字（如早期的 `user`、`dishes`）。
+
+| 一级功能 | 二级功能 | 含义 | 现有表 |
+| --- | --- | --- | --- |
+| `system` | `auth` | 系统 · 认证 | `system_auth_admin_user` |
+| `member` | `account` | 用户中心 · 账号 | `member_account_info`、`member_account_email_code` |
+| `dish` | `base` | 菜品 · 基础数据 | `dish_base_info`、`dish_base_category`、`dish_base_tag`、`dish_base_spec`、`dish_base_tag_relation` |
+| `dish` | `order` | 菜品 · 订单 | `dish_order_info`、`dish_order_item` |
+
+第三段的常用后缀语义：
+
+| 后缀 | 含义 | 示例 |
+| --- | --- | --- |
+| `info` | 主表（实体本体） | `dish_base_info`、`dish_order_info` |
+| `item` | 子表 / 明细 | `dish_order_item` |
+| `relation` | 多对多关联中间表 | `dish_base_tag_relation` |
+| `email_code` | 邮箱验证码 | `member_account_email_code` |
+
+> 新增表时必须遵循该规范；模型的 `__tablename__`、文件头注释、本 README 的目录树要一起更新。
+
+**给老库改名时的注意点**（表名只影响数据库，API 路径如 `/users`、`/members` 保持不变）：
+
+| 事项 | 说明 |
+| --- | --- |
+| 表本身 | `ALTER TABLE 旧名 RENAME TO 新名;`（SQLite / PostgreSQL / MySQL 均支持） |
+| 外键 | SQLite 与 PostgreSQL 的 `RENAME` 会**自动改写**其它表中指向该表的外键（如 `dish_order_info.member_id`），无需手工处理；MySQL 需自行核对 |
+| 索引名 | SQLAlchemy 的自动索引名跟着表名走（`ix_dishes_name` → `ix_dish_base_info_name`）。`create_all()` **不会**给已存在的表补索引，需按「列组合 + 唯一性」比对 metadata 后 DROP + CREATE 一遍 |
+| 保留字 | 表名尽量避开保留字；`user` 在 PostgreSQL 中是保留字，若非要使用，手写 SQL 必须写成 `"user"`（ORM 侧 SQLAlchemy 会自动加引号） |
+
+> 本地开发库已完成改名（10 张表 + 全部索引名 + 外键），详见 `data/app.db`。
 
 ---
 
@@ -881,7 +959,7 @@ ALTER TABLE dish_tags ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1; -- MyS
 | 测试文件 | 覆盖点 |
 | --- | --- |
 | `tests/test_api.py` | 健康检查、后台登录成功/失败、令牌校验、后台用户增删改查 |
-| `tests/test_member.py` | 验证码场景校验与冷却、注册（重复/错误码/弱密码）、会员登录与刷新、令牌作用域隔离、资料修改、头像上传（含非法文件）、修改密码、验证码重置密码、后台会员管理全流程 |
+| `tests/test_member.py` | 验证码场景校验与冷却、注册（重复/错误码/弱密码）、**6 位会员编号（格式 / 唯一性 / 后台检索）**、会员登录与刷新、令牌作用域隔离、资料修改、头像上传（含非法文件）、修改密码、验证码重置密码、后台会员管理全流程 |
 | `tests/test_dish.py` | 分类/标签 CRUD、标签启用状态（`only_active` 过滤与 C 端隐藏）、菜品与套餐增删改、图片上传、点菜菜单浏览、下单（无套餐/有套餐）、库存与销量联动、起购/限购/每日限量/供应时段校验、取消订单回滚、后台订单状态流转、会员与管理员权限隔离 |
 
 ---

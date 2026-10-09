@@ -24,8 +24,10 @@ class EmailScene(str, enum.Enum):
 class EmailCode(PKMixin, Base):
     """邮箱验证码表。"""
 
-    __tablename__ = "email_codes"
-    __table_args__ = (Index("ix_email_codes_lookup", "email", "scene", "created_at"),)
+    __tablename__ = "member_account_email_code"
+    __table_args__ = (
+        Index("ix_member_account_email_code_lookup", "email", "scene", "created_at"),
+    )
 
     email: Mapped[str] = mapped_column(String(120), nullable=False, index=True, comment="目标邮箱")
     code: Mapped[str] = mapped_column(String(10), nullable=False, comment="验证码")

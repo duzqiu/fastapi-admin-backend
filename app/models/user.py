@@ -1,4 +1,9 @@
-"""用户 ORM 模型。"""
+"""后台账号 ORM 模型。
+
+表名规范：`一级功能_二级功能_功能`
+    system_auth_admin_user  ->  系统_认证_后台账号
+    member_account_info     ->  用户中心_账号_信息（见 app/models/member.py）
+"""
 
 import enum
 from datetime import datetime
@@ -20,9 +25,9 @@ class UserRole(str, enum.Enum):
 
 
 class User(PKMixin, TimestampMixin, Base):
-    """系统用户表。"""
+    """后台账号表（管理员在后台创建，用于登录管理端）。"""
 
-    __tablename__ = "users"
+    __tablename__ = "system_auth_admin_user"
 
     username: Mapped[str] = mapped_column(
         String(50), unique=True, index=True, nullable=False, comment="登录名"

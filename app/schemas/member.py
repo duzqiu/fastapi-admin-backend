@@ -170,6 +170,7 @@ class MemberOut(ORMBaseModel):
     """会员详情出参（绝不返回密码哈希）。"""
 
     id: int
+    member_no: str = Field(default="", description="会员编号（注册时随机生成的 6 位唯一 ID）")
     email: str
     nickname: str
     display_name: str = ""
@@ -191,6 +192,7 @@ class MemberListItem(ORMBaseModel):
     """会员列表项。"""
 
     id: int
+    member_no: str = ""
     email: str
     nickname: str
     display_name: str = ""

@@ -20,6 +20,10 @@ class MemberRepository(BaseRepository[Member]):
     def get_by_email(self, email: str) -> Optional[Member]:
         return self.get_by(email=email.lower())
 
+    def member_no_taken(self, member_no: str) -> bool:
+        """判断会员编号是否已被占用（注册时用于生成不重复编号）。"""
+        return self.exists(member_no=member_no)
+
     def search(
         self,
         *,
@@ -38,6 +42,7 @@ class MemberRepository(BaseRepository[Member]):
             like = f"%{keyword.strip()}%"
             conditions.append(
                 or_(
+                    Member.member_no.like(like),
                     Member.email.like(like),
                     Member.nickname.like(like),
                     Member.phone.like(like),

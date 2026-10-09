@@ -4,6 +4,10 @@
 - 订单创建时对菜品与套餐的库存做扣减、销量做累加（服务层负责）；
 - 订单取消时按明细原样回滚；
 - 明细中保存菜品名 / 套餐名 / 单价快照，避免菜品改名或删除后历史订单失真。
+
+表名规范：`一级功能_二级功能_功能`
+    dish_order_info  ->  菜品_订单_信息（订单主表）
+    dish_order_item  ->  菜品_订单_明细
 """
 
 import enum
@@ -43,14 +47,14 @@ ORDER_TRANSITIONS = {
 class DishOrder(PKMixin, TimestampMixin, Base):
     """点菜订单主表。"""
 
-    __tablename__ = "dish_orders"
-    __table_args__ = (Index("ix_dish_orders_status_created", "status", "created_at"),)
+    __tablename__ = "dish_order_info"
+    __table_args__ = (Index("ix_dish_order_info_status_created", "status", "created_at"),)
 
     order_no: Mapped[str] = mapped_column(
         String(32), unique=True, index=True, nullable=False, comment="订单号"
     )
     member_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("members.id", ondelete="SET NULL"),
+        ForeignKey("member_account_info.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
         comment="下单会员（扫码点菜可不登录，故允许为空）",
@@ -106,16 +110,16 @@ class DishOrder(PKMixin, TimestampMixin, Base):
 class DishOrderItem(PKMixin, Base):
     """订单明细（保存下单时的快照）。"""
 
-    __tablename__ = "dish_order_items"
+    __tablename__ = "dish_order_item"
 
     order_id: Mapped[int] = mapped_column(
-        ForeignKey("dish_orders.id", ondelete="CASCADE"), index=True, nullable=False
+        ForeignKey("dish_order_info.id", ondelete="CASCADE"), index=True, nullable=False
     )
     dish_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("dishes.id", ondelete="SET NULL"), nullable=True, index=True
+        ForeignKey("dish_base_info.id", ondelete="SET NULL"), nullable=True, index=True
     )
     spec_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("dish_specs.id", ondelete="SET NULL"), nullable=True, index=True
+        ForeignKey("dish_base_spec.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
     dish_name: Mapped[str] = mapped_column(String(100), default="", comment="菜品名快照")
