@@ -1,0 +1,35 @@
+# 依赖 / 虚拟环境（镜像内重新安装）
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 本地数据：SQLite 库与上传文件都不该打进镜像
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# 环境变量与密钥：务必通过环境变量或挂载注入，不要烤进镜像
+.env
+.env.local
+.env.docker
+!.env.example
+!.env.docker.example
+
+# 测试与缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 开发工具与文档
+.git/
+.gitignore
+.idea/
+.vscode/
+*.swp
+.DS_Store

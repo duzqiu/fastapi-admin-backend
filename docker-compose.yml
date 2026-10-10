@@ -1,0 +1,81 @@
+# 后端接口服务的 Docker 部署（数据库是宿主机上「另一个」PG 容器，不在本 compose 内）
+#
+# 镜像构建上下文直接来自 GitHub，服务器上不需要放源码：
+#   https://github.com/duzqiu/fastapi-admin-backend.git
+#
+# ⚠️ 前置：
+#   1) 该仓库里必须已经存在 Dockerfile 与 .dockerignore，否则 build 会报「找不到 Dockerfile」；
+#   2) 目标数据库要已存在（后端只建表，不会建库），例如：
+#        docker exec -it <PG容器名> psql -U postgres -c "CREATE DATABASE admin_db;"
+#
+# 用法：
+#   cp .env.docker.example .env     # 填 PG 连接信息与密钥（compose 会自动读取同目录的 .env）
+#   docker compose up -d --build
+#   docker compose logs -f backend
+#
+# 访问：http://<服务器IP>:8000/docs     健康检查：/api/v1/system/health
+name: fastapi-admin
+
+services:
+  backend:
+    build:
+      # 直接从 GitHub 拉源码作为构建上下文；要固定版本可写 ...git#v1.0.0 或 ...git#分支名
+      context: https://github.com/duzqiu/fastapi-admin-backend.git
+    image: fastapi-admin-backend:1.0.0
+    container_name: admin-backend
+    restart: unless-stopped
+    # 让容器能用 host.docker.internal 访问宿主机（Linux 需要这行；Docker Desktop 自带）
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      # uvicorn 进程数（PG 下多进程是安全的）
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      # 连的是宿主机上另一个 PG 容器暴露出来的端口（默认 5452）。
+      # 默认用 host.docker.internal 而不是 127.0.0.1 —— 后者在容器里指的是容器自己。
+      #
+      # 备选（更推荐的生产做法）：把两个容器接到同一个自定义网络，用「PG 容器名 + 容器内端口 5432」直连：
+      #   docker network create admin-net && docker network connect admin-net <PG容器名>
+      #   然后在 .env 里写 PG_HOST=<PG容器名>、PG_PORT=5432，并给本服务加上 external 网络（见 README 13.5）
+      DATABASE_URL: "postgresql+psycopg://${PG_USER:-postgres}:${PG_PASSWORD:-123456}@${PG_HOST:-host.docker.internal}:${PG_PORT:-5452}/${PG_DB:-admin_db}"
+      # 生产必须替换：python -c "import secrets;print(secrets.token_urlsafe(48))"
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production-please-replace-me-0123456789}
+      DEBUG: ${DEBUG:-false}
+      # 改成前端实际访问地址，否则浏览器会被 CORS 拦下
+      BACKEND_CORS_ORIGINS: "${BACKEND_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}"
+      # 首次启动自动创建的管理员账号
+      FIRST_SUPERUSER_USERNAME: ${FIRST_SUPERUSER_USERNAME:-admin}
+      FIRST_SUPERUSER_PASSWORD: ${FIRST_SUPERUSER_PASSWORD:-admin123}
+      FIRST_SUPERUSER_EMAIL: ${FIRST_SUPERUSER_EMAIL:-admin@example.com}
+      FIRST_SUPERUSER_NICKNAME: ${FIRST_SUPERUSER_NICKNAME:-超级管理员}
+      # 用户中心邮件：不配 SMTP 时验证码只写日志
+      MAIL_ENABLED: ${MAIL_ENABLED:-false}
+      MAIL_HOST: ${MAIL_HOST:-smtp.example.com}
+      MAIL_PORT: ${MAIL_PORT:-465}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-后台管理系统 <noreply@example.com>}
+      # 生产必须 false，否则验证码会回显在接口响应里
+      EMAIL_CODE_DEBUG_RETURN: ${EMAIL_CODE_DEBUG_RETURN:-false}
+      UPLOAD_DIR: ./data/uploads
+    ports:
+      - "8000:8000"
+    volumes:
+      # 用命名卷而不是 bind mount：容器以非 root 用户运行，
+      # 宿主机目录被 Docker 自动创建时属主是 root，会导致上传失败。
+      - uploads:/app/data/uploads
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/system/health', timeout=4).status == 200 else 1)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  uploads:

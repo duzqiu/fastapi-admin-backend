@@ -9,9 +9,10 @@ dist/
 venv/
 env/
 
-# 环境变量
+# 环境变量（.env.docker 里含数据库密码与 SECRET_KEY，务必不要提交）
 .env
 .env.local
+.env.docker
 
 # 数据库与数据文件
 data/

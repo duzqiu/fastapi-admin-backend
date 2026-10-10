@@ -40,6 +40,7 @@
 | 点菜菜单与订单 | 菜品（菜名/图片/价格/库存）、**多套餐与售卖规则**（起购 / 限购 / 每日限量 / 供应时段）、分类与标签、**销量统计**、下单与订单管理闭环 |
 | 通用后台 CRUD | 后台用户管理、**会员管理**（查看 / 修改 / 启禁用 / 重置密码 / 删除）、菜品管理、订单管理 |
 | 分层基础设施 | 统一配置、统一异常、统一分页、请求日志、跨域、邮件、文件上传、初始化与迁移脚本 |
+| 部署方式 | 单机 / Gunicorn / systemd / Nginx 反代，以及 **Docker 容器（可对接另一个容器里的 PostgreSQL）** |
 
 设计目标：**高内聚**（每种职能只出现在固定的一层里）、**低耦合**（上层依赖下层接口，替换任一层的实现不影响其他层）。
 
@@ -208,6 +209,12 @@ fastapi-admin-backend/
 ├── run.py                              开发环境启动脚本
 ├── requirements.txt                    依赖清单
 ├── pytest.ini                          pytest 配置
+│
+├── Dockerfile                          ★ 后端镜像（Python 3.13-slim + 非 root + 健康检查）
+├── .dockerignore                       构建上下文排除规则（不含 .env / data）
+├── docker-compose.yml                  ★ 后端容器编排，连接宿主机上另一个 PG 容器
+├── .env.docker.example                 compose 变量模板（cp 成 .env 使用，含 PG 连接信息）
+│
 ├── .env.example                        环境变量模板
 └── .gitignore
 ```
@@ -714,6 +721,7 @@ curl.exe -X PATCH http://127.0.0.1:8000/api/v1/dish-orders/1/status `
 | A. 仅改连接串 | 数据可丢弃的开发环境 | 改 `DATABASE_URL`，启动时自动建表 |
 | B. Alembic | 需要版本化的结构变更 | 见[第十一节](#十一数据库结构版本管理alembic) |
 | C. 迁移脚本 | **保留 SQLite 现有数据** | 见下方 10.3，本项目推荐生产使用 |
+| D. Docker 部署 | 后端容器 + 宿主机上另一个 PG 容器 | 见 [13.5 节](#135-docker-部署后端容器--宿主机上的另一个-pg-容器) |
 
 ### 10.2 第一步：安装驱动并创建目标库
 
@@ -966,6 +974,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS ix_member_account_info_member_no
 
 ## 十三、生产部署
 
+四种方式，按需选择：**13.1 单机** → **13.2 Gunicorn** → **13.3 systemd 常驻** →
+**13.4 Nginx 反向代理** → **13.5 Docker（后端容器 + 独立 PG 容器）**。
+无论哪种方式，上线前都要：关闭 `DEBUG`、更换 `SECRET_KEY`、把 `DATABASE_URL` 指向正式库。
+
 ### 13.1 单机（Windows / Linux 通用）
 
 ```powershell
@@ -1032,6 +1044,154 @@ server {
 }
 ```
 
+### 13.5 Docker 部署（后端容器 + 宿主机上的另一个 PG 容器）
+
+目标形态：**只把后端放进容器，数据库用同宿主机上另一个已有的 PG 容器**
+（PG 不在本 compose 内，通过它的宿主机映射端口访问）；**镜像的构建上下文直接从 GitHub 拉取**，
+服务器上不需要放源码：
+
+```
+https://github.com/duzqiu/fastapi-admin-backend.git
+```
+
+| 文件 | 作用 |
+| --- | --- |
+| `Dockerfile` | 后端镜像：Python 3.13-slim + 依赖 + 非 root 用户 + 健康检查 |
+| `docker-compose.yml` | **只有 backend 一个服务**，`build.context` 指向 GitHub 仓库 |
+| `.env.docker.example` | compose 变量模板（`cp` 成 `.env`，用于覆盖 PG 连接信息与密钥） |
+
+#### 步骤 0（必须先做）：把 Dockerfile 推送到仓库
+
+`build.context` 是 Git 仓库时，**Dockerfile 必须存在于那个上下文里**，否则构建会直接报
+`failed to read dockerfile: ... Dockerfile: not found`。先在本地仓库提交并推送：
+
+```bash
+git add Dockerfile .dockerignore docker-compose.yml .env.docker.example .gitignore README.md
+git commit -m "add docker deployment"
+git push origin main
+```
+
+推送后 `docker compose up -d --build` 就会用**最新提交**作为构建上下文。
+要固定版本可以写 `context: https://github.com/duzqiu/fastapi-admin-backend.git#v1.0.0`（分支 / 标签 / 提交号都支持）。
+
+#### 步骤 1：确认 PG 容器信息、建好目标库
+
+```bash
+# 找到 PG 容器的名字、镜像与端口映射（关注 5452->5432 这一条）
+docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Ports}}"
+
+# 后端只建表、不建库，目标库要事先存在（库名与 .env 里的 PG_DB 保持一致）
+docker exec -it <PG容器名> psql -U postgres -c "CREATE DATABASE admin_db;"
+```
+
+#### 步骤 2：在服务器上准备 compose 与配置
+
+只需要 `docker-compose.yml` 和 `.env.docker.example` 两个文件，**不用把源码拷过去**：
+
+```bash
+mkdir -p /opt/fastapi-admin && cd /opt/fastapi-admin
+# 从仓库取这两个文件（git clone 整个仓库、或单独下载这两个文件都行）
+
+cp .env.docker.example .env      # 文件名必须是 .env，compose 才会自动读取
+```
+
+数据库相关的默认值已经按「PG 在宿主机、映射端口 5452、用户 postgres」填好，按实际改即可：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `PG_HOST` | `host.docker.internal` | 容器里访问宿主机；**不要写 `127.0.0.1`**（那是容器自己） |
+| `PG_PORT` | `5452` | 宿主机映射出来的端口（PG 容器自身监听的是 5432） |
+| `PG_USER` / `PG_PASSWORD` | `postgres` / `123456` | 按你的实际账号改 |
+| `PG_DB` | `admin_db` | 目标库，必须已存在（步骤 1） |
+
+后端会用这些值拼出 `DATABASE_URL`：
+`postgresql+psycopg://postgres:123456@host.docker.internal:5452/admin_db`
+
+> 上线前还要改：`SECRET_KEY`（否则任何人都能伪造 JWT）、`BACKEND_CORS_ORIGINS`（前端实际地址）、
+> `FIRST_SUPERUSER_PASSWORD`；`DEBUG` 与 `EMAIL_CODE_DEBUG_RETURN` 保持 `false`。
+
+#### 步骤 3：构建并启动
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs -f backend
+curl http://127.0.0.1:8000/api/v1/system/health
+```
+
+首次启动会自动建表并写入初始管理员（`scripts/init_db.py` 幂等，可重复执行）。
+如果 PG 还没起来，入口会失败退出，`restart: unless-stopped` 会自动重试。
+
+#### 步骤 4：把本地 SQLite 的数据迁到 PG
+
+应用启动只会**建表**，不会搬数据。PG 端口已映射到宿主机 `5452`，两种方式都行：
+
+```bash
+# 方式 A：在宿主机直接跑（需要有项目源码与虚拟环境；源库默认就是 ./data/app.db）
+./.venv/Scripts/python.exe scripts/migrate_database.py \
+  --target "postgresql+psycopg://postgres:123456@127.0.0.1:5452/admin_db" \
+  --create-tables --truncate
+```
+
+```bash
+# 方式 B：在容器里跑（服务器上没有源码时用这个，把 SQLite 文件挂进去即可）
+docker compose run --rm \
+  -v "$(pwd)/data:/app/data" \
+  backend python scripts/migrate_database.py --create-tables --truncate
+```
+
+> Windows PowerShell 把 `$(pwd)` 换成 `${PWD}`。方式 B 里 `--target` 可省略，
+> 脚本会自动取容器内的 `DATABASE_URL`。
+
+说明：
+
+- 方式 A 用的是宿主机视角的 `127.0.0.1:5452`，方式 B 用的是容器视角的
+  `host.docker.internal:5452`，两者指向同一个 PG；
+- `--truncate` 会**按外键逆序**先清空目标表再写入（目标库已有播种数据时正是需要的）；
+- 脚本按外键顺序分批拷贝，并对 PostgreSQL 执行 `setval` **重置自增序列**，否则新记录会撞主键；
+- 想先确认两边行数是否一致：把 `--create-tables --truncate` 换成 `--verify-only`；
+- 跑完执行 `docker compose restart backend`。
+
+#### 步骤 5：常见坑
+
+| 现象 | 原因与处理 |
+| --- | --- |
+| 构建报 `Dockerfile not found` | 仓库里还没有 `Dockerfile`，先做步骤 0 |
+| 构建报拉取 / 认证失败 | 仓库是私有的，需要在 `build.context` 里带凭据或先 `docker login`；公开仓库无此问题 |
+| 不支持 Git 作为构建上下文 | 需要 BuildKit（Docker 23+ / Compose v2 默认开启）：`DOCKER_BUILDKIT=1 docker compose build` |
+| 服务器拉不动 GitHub | 备选：在服务器上 `git clone` 仓库，把 compose 里的 `context` 改成 `.`（本地目录），效果一样 |
+| 连不上数据库（超时） | 主机名写成了 `127.0.0.1`。容器里要用 `host.docker.internal`；Linux 靠 compose 里的 `extra_hosts: host-gateway` 才能解析，容器里可执行 `python -c "import socket;print(socket.gethostbyname('host.docker.internal'))"` 验证 |
+| 报 `database "admin_db" does not exist` | 目标库没建，按步骤 1 先 `CREATE DATABASE` |
+| 报认证失败 / `password authentication failed` | `PG_USER` / `PG_PASSWORD` 与 PG 实际账号不一致 |
+| 后端容器启动即退出 | 入口 `scripts/init_db.py` 连不上库会失败退出；`restart: unless-stopped` 会自动重试，日志搜「数据库初始化失败」 |
+| 时段规则不对 | 容器默认 UTC，`TZ` 要设成 `Asia/Shanghai`（影响菜品「供应时段 / 每日限量」） |
+| 上传的图片想导出 | 已用命名卷 `uploads` 持久化：`docker cp admin-backend:/app/data/uploads ./` |
+| 改了 `.env` 不生效 | 变量只在创建容器时注入，需 `docker compose up -d --force-recreate` |
+| 更新到最新代码 | `docker compose up -d --build`（重新拉 GitHub 最新提交，数据卷与表结构不受影响） |
+
+> **更推荐的生产做法（不绕宿主机）**：把两个容器接到同一个自定义网络，用容器名 + 容器内端口直连：
+>
+> ```bash
+> docker network create admin-net
+> docker network connect admin-net <PG容器名>       # 把已有 PG 接进来
+> ```
+>
+> 然后 `.env` 里写 `PG_HOST=<PG容器名>`、`PG_PORT=5432`，并给 compose 的 backend 加上：
+>
+> ```yaml
+>     networks: [admin-net]
+> # 文件末尾
+> networks:
+>   admin-net:
+>     external: true
+> ```
+>
+> 好处是不经过宿主机端口转发、少一层 NAT，且 PG 端口可以不对宿主机暴露。
+
+> 表名已统一成 `dish_base_* / dish_order_* / member_account_* / system_auth_admin_user`，
+> 不含 `user` 这类 PostgreSQL 保留字，建表与查询都不需要额外加双引号。
+> 全部 DDL 已用 PostgreSQL 方言预编译校验通过（`SERIAL` / `BOOLEAN` / `TIMESTAMP WITHOUT TIME ZONE` / 外键动作）。
+
 ---
 
 ## 十四、与前端项目的对接
@@ -1059,7 +1219,12 @@ BACKEND_CORS_ORIGINS=http://localhost:5173,https://admin.example.com
 | 启动报 `database is locked` | SQLite 并发写限制，改用 PostgreSQL/MySQL |
 | 前端请求返回 403/被浏览器拦截 | `BACKEND_CORS_ORIGINS` 未包含前端域名 |
 | 401 且提示「登录状态已过期」 | access_token 过期，需用 refresh_token 刷新 |
-| 迁移后 PG 插入主键冲突 | 已自动 `setval` 重置序列；若手动插过数据需重跑 9.3 节 |
+| 迁移后 PG 插入主键冲突 | 已自动 `setval` 重置序列；若手动插过数据需重跑 10.3 节 |
+| Docker 里连不上 PG | 容器里不能用 `127.0.0.1`（那是容器自己）；连宿主机上的 PG 用 `host.docker.internal` + 映射端口，或两容器共享自定义网络后用容器名 + 5432，见 13.5 |
+| Docker 里报数据库不存在 | 后端只建表不建库，需先 `CREATE DATABASE`，见 13.5 步骤 1 |
+| Docker 构建报 `Dockerfile not found` | `build.context` 指向 GitHub 时，Dockerfile 必须先推送到该仓库，见 13.5 步骤 0 |
+| Docker 里时段 / 每日限量判断错误 | 容器默认 UTC，需设置 `TZ=Asia/Shanghai` |
+| Docker 容器重启后上传的图片丢失 | 上传目录没挂 volume；compose 里已用命名卷 `uploads` 持久化 |
 | 密码校验 422 | 密码要求同时包含字母和数字，长度 6–64 |
 | 收不到注册验证码 | 未配置 SMTP 时不会真实发信：看响应 `debug_code`，或看服务端日志 `[用户中心] ... code=` |
 | 验证码提示「发送过于频繁」 | 同一邮箱 + 场景有 60 秒冷却，可用 `EMAIL_CODE_RESEND_SECONDS=0` 在本地关闭 |
