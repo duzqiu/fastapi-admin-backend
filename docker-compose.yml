@@ -21,7 +21,18 @@ services:
     build:
       # 直接从 GitHub 拉源码作为构建上下文；要固定版本可写 ...git#v1.0.0 或 ...git#分支名
       context: https://github.com/duzqiu/fastapi-admin-backend.git
+      # 构建参数透传（在 .env 里改即可）。网络受限时把基础镜像 / apt / pip 源换成可达的地址：
+      # 基础镜像写「完整仓库地址」会绕过 daemon 里失效的加速器（403 Forbidden 常见原因）
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.13-slim}
+        APT_MIRROR: ${APT_MIRROR:-}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     image: fastapi-admin-backend:1.0.0
+    # 关键：明确「本地构建，不要拉取」。
+    # 默认策略是 missing（镜像不在本地就先去仓库拉），于是会出现 `backend Pulling`
+    # 并报 pull access denied —— 该镜像只存在于本机构建产物里，Docker Hub 上并没有。
+    # 加这一行后，up / pull 都会走构建分支。
+    pull_policy: build
     container_name: admin-backend
     restart: unless-stopped
     # 让容器能用 host.docker.internal 访问宿主机（Linux 需要这行；Docker Desktop 自带）

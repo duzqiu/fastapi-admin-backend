@@ -1103,6 +1103,9 @@ cp .env.docker.example .env      # 文件名必须是 .env，compose 才会自�
 | `PG_PORT` | `5452` | 宿主机映射出来的端口（PG 容器自身监听的是 5432） |
 | `PG_USER` / `PG_PASSWORD` | `postgres` / `123456` | 按你的实际账号改 |
 | `PG_DB` | `admin_db` | 目标库，必须已存在（步骤 1） |
+| `PYTHON_IMAGE` | `python:3.13-slim` | 基础镜像。网络受限时填**完整仓库地址**可绕过 daemon 里失效的加速器 |
+| `APT_MIRROR` | 空 | Debian 源镜像（装 tzdata 用），如 `https://mirrors.aliyun.com/debian` |
+| `PIP_INDEX_URL` | `https://pypi.org/simple` | PyPI 源，如 `https://pypi.tuna.tsinghua.edu.cn/simple`（必须是 https） |
 
 后端会用这些值拼出 `DATABASE_URL`：
 `postgresql+psycopg://postgres:123456@host.docker.internal:5452/admin_db`
@@ -1158,6 +1161,10 @@ docker compose run --rm \
 | --- | --- |
 | 构建报 `Dockerfile not found` | 仓库里还没有 `Dockerfile`，先做步骤 0 |
 | 构建报拉取 / 认证失败 | 仓库是私有的，需要在 `build.context` 里带凭据或先 `docker login`；公开仓库无此问题 |
+| 输出 `backend Pulling` 然后报 `pull access denied` / `manifest unknown` | compose 把 `image: fastapi-admin-backend:1.0.0` 当成要从仓库拉的镜像了（该镜像只在本地构建产生）。本文件已加 `pull_policy: build` 明确「只构建、不拉取」；若仍出现，多半是手动执行了 `docker compose pull`（对纯构建服务没意义），或 `docker compose config` 里看不到 `build` 段（说明用的不是这份文件） |
+| 报 `Unsupported config option for services.backend: 'pull_policy'` | compose 版本过旧（v1 不支持 `pull_policy` / `name` / 远程 git 上下文），升级到 Compose v2：`docker compose version` |
+| 报 `failed to resolve source metadata for docker.io/library/python:3.13-slim: ... 403 Forbidden` | Docker daemon 里配的加速器（Registry Mirror）失效了 —— 报错 URL 里的域名就是它（如 `docker.xuanyuan.me`），`docker info` 可以看到全部加速器。两条路：① 改宿主机 `/etc/docker/daemon.json` 换掉失效的加速器并 `systemctl restart docker`；② 让构建绕过它：在 `.env` 里把 `PYTHON_IMAGE` 设成**完整仓库地址**（如 `docker.m.daocloud.io/library/python:3.13-slim`），Docker 对完整地址不再走 docker.io 的加速器，可先用 `docker pull` 验证该地址可达 |
+| 装依赖时 `pip install` 超时 / SSL 报错 | 在 `.env` 里把 `PIP_INDEX_URL` 指向可达的 PyPI 源（必须是 https，如 `https://pypi.tuna.tsinghua.edu.cn/simple`）；`apt-get update` 慢则设 `APT_MIRROR`（如 `https://mirrors.aliyun.com/debian`） |
 | 不支持 Git 作为构建上下文 | 需要 BuildKit（Docker 23+ / Compose v2 默认开启）：`DOCKER_BUILDKIT=1 docker compose build` |
 | 服务器拉不动 GitHub | 备选：在服务器上 `git clone` 仓库，把 compose 里的 `context` 改成 `.`（本地目录），效果一样 |
 | 连不上数据库（超时） | 主机名写成了 `127.0.0.1`。容器里要用 `host.docker.internal`；Linux 靠 compose 里的 `extra_hosts: host-gateway` 才能解析，容器里可执行 `python -c "import socket;print(socket.gethostbyname('host.docker.internal'))"` 验证 |
