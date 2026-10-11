@@ -23,6 +23,7 @@ PyMySQL==1.1.1                # MySQL 驱动（SQLAlchemy URL: mysql+pymysql://�
 # ===== 其他 =====
 python-multipart==0.0.20      # OAuth2 表单登录 / 文件上传
 python-dotenv==1.0.1
+lunar-python==1.4.8           # 公历 <-> 农历换算（倒数日农历展示）
 
 # ===== 测试 =====
 pytest==8.3.4

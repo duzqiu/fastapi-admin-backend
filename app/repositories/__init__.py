@@ -7,6 +7,7 @@
 """
 
 from app.repositories.base import BaseRepository
+from app.repositories.countdown_repository import CountdownRepository
 from app.repositories.dish_order_repository import DishOrderRepository
 from app.repositories.dish_repository import (
     DishCategoryRepository,
@@ -20,6 +21,7 @@ from app.repositories.user_repository import UserRepository
 
 __all__ = [
     "BaseRepository",
+    "CountdownRepository",
     "DishCategoryRepository",
     "DishOrderRepository",
     "DishRepository",

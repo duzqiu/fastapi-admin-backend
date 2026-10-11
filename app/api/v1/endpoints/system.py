@@ -7,7 +7,7 @@ from app.models.user import User
 from app.schemas.system import DashboardStatsOut, HealthOut, SystemInfoOut
 from app.services.system_service import SystemService
 
-router = APIRouter(prefix="/system", tags=["系统"])
+router = APIRouter(prefix="/system", tags=["后台-仪表盘-统计与系统信息"])
 
 
 @router.get("/health", response_model=HealthOut, summary="健康检查（无需登录）")

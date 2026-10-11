@@ -23,7 +23,7 @@ from app.services.member_service import MemberService
 
 router = APIRouter(
     prefix="/members",
-    tags=["会员管理"],
+    tags=["后台-用户管理-用户列表"],
     dependencies=[Depends(get_current_admin)],
 )
 

@@ -18,7 +18,7 @@ from app.schemas.member import (
 from app.services.member_auth_service import MemberAuthService
 from app.services.member_service import MemberService
 
-router = APIRouter(prefix="/member", tags=["用户中心-个人中心"])
+router = APIRouter(prefix="/member", tags=["前端-用户中心-个人中心"])
 
 
 @router.get("/profile", response_model=MemberOut, summary="查看我的资料")

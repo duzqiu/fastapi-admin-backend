@@ -7,6 +7,7 @@
 """
 
 from app.services.auth_service import AuthService
+from app.services.countdown_service import CountdownService
 from app.services.dish_order_service import DishOrderService
 from app.services.dish_service import DishService
 from app.services.email_code_service import EmailCodeService
@@ -17,6 +18,7 @@ from app.services.user_service import UserService
 
 __all__ = [
     "AuthService",
+    "CountdownService",
     "DishOrderService",
     "DishService",
     "EmailCodeService",

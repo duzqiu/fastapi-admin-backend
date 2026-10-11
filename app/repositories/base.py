@@ -62,7 +62,11 @@ class BaseRepository(Generic[ModelType]):
         total = int(self.db.execute(count_stmt).scalar_one())
 
         if order_by is not None:
-            stmt = stmt.order_by(order_by)
+            # 支持传入单个表达式或 (list/tuple) 多字段组合
+            if isinstance(order_by, (list, tuple)):
+                stmt = stmt.order_by(*order_by)
+            else:
+                stmt = stmt.order_by(order_by)
         stmt = stmt.offset(offset).limit(limit)
         items = list(self.db.execute(stmt).scalars().unique().all())
         return items, total

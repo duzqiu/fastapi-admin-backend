@@ -20,7 +20,7 @@ from app.schemas.member import (
 )
 from app.services.member_auth_service import MemberAuthService
 
-router = APIRouter(prefix="/member/auth", tags=["用户中心-认证"])
+router = APIRouter(prefix="/member/auth", tags=["前端-用户中心-认证"])
 
 
 @router.post("/send-code", response_model=SendCodeResponse, summary="发送邮箱验证码")

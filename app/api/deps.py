@@ -22,6 +22,7 @@ from app.db.session import get_db
 from app.models.member import Member
 from app.models.user import User, UserRole
 from app.services.auth_service import AuthService
+from app.services.countdown_service import CountdownService
 from app.services.dish_order_service import DishOrderService
 from app.services.dish_service import DishService
 from app.services.email_code_service import EmailCodeService
@@ -103,6 +104,10 @@ def get_dish_service(db: Session = Depends(get_db)) -> DishService:
 
 def get_dish_order_service(db: Session = Depends(get_db)) -> DishOrderService:
     return DishOrderService(db)
+
+
+def get_countdown_service(db: Session = Depends(get_db)) -> CountdownService:
+    return CountdownService(db)
 
 
 # ------------------------- 后台账号认证 / 鉴权 -------------------------

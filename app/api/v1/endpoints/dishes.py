@@ -33,11 +33,11 @@ from app.services.dish_service import DishService
 
 admin_dependency = [Depends(get_current_admin)]
 
-router = APIRouter(prefix="/dishes", tags=["菜品管理"], dependencies=admin_dependency)
+router = APIRouter(prefix="/dishes", tags=["后台-菜品管理-菜品列表"], dependencies=admin_dependency)
 category_router = APIRouter(
-    prefix="/dish-categories", tags=["菜品分类"], dependencies=admin_dependency
+    prefix="/dish-categories", tags=["后台-菜品管理-菜品分类"], dependencies=admin_dependency
 )
-tag_router = APIRouter(prefix="/dish-tags", tags=["菜品标签"], dependencies=admin_dependency)
+tag_router = APIRouter(prefix="/dish-tags", tags=["后台-菜品管理-菜品标签"], dependencies=admin_dependency)
 
 
 # ==================== 分类 ====================

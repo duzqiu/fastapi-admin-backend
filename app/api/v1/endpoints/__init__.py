@@ -2,6 +2,7 @@
 
 from app.api.v1.endpoints import (
     auth,
+    countdowns,
     dish_orders,
     dishes,
     member_auth,
@@ -14,6 +15,7 @@ from app.api.v1.endpoints import (
 
 __all__ = [
     "auth",
+    "countdowns",
     "dish_orders",
     "dishes",
     "member_auth",

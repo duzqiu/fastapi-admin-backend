@@ -16,7 +16,7 @@ from app.services.dish_order_service import DishOrderService
 
 router = APIRouter(
     prefix="/dish-orders",
-    tags=["订单管理"],
+    tags=["后台-菜品管理-订单管理"],
     dependencies=[Depends(get_current_admin)],
 )
 

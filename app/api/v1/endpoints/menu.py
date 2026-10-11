@@ -25,7 +25,7 @@ from app.schemas.dish_order import OrderCreate, OrderListItem, OrderOut
 from app.services.dish_order_service import DishOrderService
 from app.services.dish_service import DishService
 
-router = APIRouter(prefix="/menu", tags=["点菜菜单"])
+router = APIRouter(prefix="/menu", tags=["前端-点菜菜单-菜品与订单"])
 
 
 def _to_menu_item(dish: Dish) -> MenuDishItem:

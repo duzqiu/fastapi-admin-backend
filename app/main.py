@@ -81,7 +81,7 @@ def create_app() -> FastAPI:
         name="assets",
     )
 
-    @application.get("/", tags=["系统"], summary="服务根路径")
+    @application.get("/", tags=["后台-仪表盘-统计与系统信息"], summary="服务根路径")
     def root() -> dict:
         return {
             "name": settings.PROJECT_NAME,

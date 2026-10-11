@@ -18,7 +18,7 @@ from app.services.user_service import UserService
 
 router = APIRouter(
     prefix="/users",
-    tags=["用户管理"],
+    tags=["后台-后台账号-账号管理"],
     dependencies=[Depends(get_current_admin)],
 )
 

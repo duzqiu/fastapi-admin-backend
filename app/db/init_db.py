@@ -15,6 +15,7 @@ from app.core.utils import generate_member_no, utcnow
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models import (  # noqa: F401  确保模型已注册
+    Countdown,
     Dish,
     DishCategory,
     DishSpec,

@@ -10,7 +10,7 @@ from app.schemas.common import MessageResponse
 from app.schemas.user import PasswordChange, UserOut
 from app.services.auth_service import AuthService
 
-router = APIRouter(prefix="/auth", tags=["认证"])
+router = APIRouter(prefix="/auth", tags=["后台-认证-登录"])
 
 
 @router.post("/login", response_model=Token, summary="账号密码登录")

@@ -61,7 +61,7 @@ class MemberRepository(BaseRepository[Member]):
 
         return self.list(
             conditions=conditions,
-            order_by=Member.id.desc(),
+            order_by=Member.id.asc(),
             offset=offset,
             limit=limit,
         )
