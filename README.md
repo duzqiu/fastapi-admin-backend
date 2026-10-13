@@ -309,7 +309,7 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
 | `MAIL_ENABLED` | false | 是否真正发送邮件；false 时验证码只写入服务端日志 |
 | `MAIL_HOST` / `MAIL_PORT` | smtp.example.com / 465 | SMTP 服务器与端口 |
 | `MAIL_USERNAME` / `MAIL_PASSWORD` | 空 | SMTP 登录账号（多数邮箱需使用「授权码」而非登录密码） |
-| `MAIL_FROM` | 后台管理系统 <noreply@example.com> | 发件人 |
+| `MAIL_FROM` | 后台管理系统 <noreply@example.com> | 发件人。**建议直接写 `你的邮箱`**：服务商会校验「信封发件人 == 登录账号」。注意 `${MAIL_FROM:-...}` 的 `:-` 在**值为空时也会取默认值**，老版 compose 留空会变成 `noreply@example.com` 而被拒发（新版已改为 `${MAIL_FROM:-}`，留空才回退到 `MAIL_USERNAME`） |
 | `MAIL_USE_SSL` | true | true 用 `SMTP_SSL`，false 用 `SMTP + STARTTLS` |
 | `MAIL_TIMEOUT` | 10 | 发信超时（秒） |
 | `EMAIL_CODE_LENGTH` | 6 | 验证码位数 |
@@ -328,7 +328,9 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
 ./.venv/Scripts/python.exe -c "import secrets;print(secrets.token_urlsafe(48))"
 ```
 
-常用邮箱的 SMTP 参考（`MAIL_PASSWORD` 请填写邮箱后台生成的授权码）：
+常用邮箱的 SMTP 参考（`MAIL_PASSWORD` 请填写邮箱后台生成的授权码）。**本仓库的
+`.env.docker.example` 已按 QQ 邮箱预置好**（`MAIL_ENABLED=true` + `smtp.qq.com:465` +
+`MAIL_USE_SSL=true`），只需再补两项：`MAIL_USERNAME`（QQ 邮箱地址）与 `MAIL_PASSWORD`（授权码）：
 
 | 邮箱 | MAIL_HOST | MAIL_PORT | MAIL_USE_SSL |
 | --- | --- | --- | --- |
@@ -336,6 +338,61 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
 | 163 邮箱 | smtp.163.com | 465 | true |
 | Gmail | smtp.gmail.com | 587 | false（STARTTLS） |
 | 企业微信/腾讯企业邮 | smtp.exmail.qq.com | 465 | true |
+
+#### 在 Docker 里使用邮件（凭据已内置，零配置）
+
+`docker-compose.yml` 与 `.env.docker.example` 的默认值里**已内置可用的 QQ 邮箱配置**
+（开关 + `smtp.qq.com:465` + 账号 + 授权码 + 发件人），所以**新服务器只拿这一个 compose 文件就能发信**，
+不需要再准备 `.env`：
+
+```bash
+mkdir -p /opt/fastapi-admin && cd /opt/fastapi-admin
+# 只放 docker-compose.yml，直接起
+docker compose up -d --build
+docker exec admin-backend env | grep -i '^MAIL_'     # 能看到全部 8 个 MAIL_ 变量即生效
+```
+
+> ⚠️ **这意味着凭据是公开的**：这两个文件都会推送到 GitHub，任何能看到仓库的人都能用该邮箱发信。
+> 想降低风险，三选一：
+> ① 把仓库设为**私有**（注意：`build.context` 指向私有仓库时，构建需要额外提供凭据）；
+> ② 在 QQ 邮箱后台**重置授权码**（旧码立即失效），再同步修改 `docker-compose.yml` 与
+> `.env.docker.example` 两处；
+> ③ 换成一个专用的运行邮箱，与个人邮箱隔离。
+>
+> 想临时关闭发信：在 `.env` 里写 `MAIL_ENABLED=false`（`.env` 的值优先于 compose 默认值）。
+
+> ⚠️ **旧 `.env` 会覆盖新默认值**：若部署目录里已有早前 `cp` 出来的 `.env`，其中的
+> `MAIL_ENABLED=false`、`MAIL_HOST=smtp.example.com` 会让邮件发不出去——删掉那几行即可
+> （`sed -i '/^MAIL_/d' .env`）。要换用自己的 SMTP，就在 `.env` 里追加同名变量：
+
+```bash
+cd /opt/fastapi-admin                                  # docker-compose.yml 所在目录
+sed -i '/^MAIL_/d' .env
+cat >> .env <<'EOF'
+MAIL_ENABLED=true
+MAIL_HOST=smtp.qq.com
+MAIL_PORT=465
+MAIL_USE_SSL=true
+MAIL_TIMEOUT=10
+MAIL_USERNAME=你的QQ邮箱@qq.com
+MAIL_PASSWORD=邮箱后台生成的SMTP授权码
+MAIL_FROM=你的QQ邮箱@qq.com
+EOF
+docker compose up -d --force-recreate --no-build backend   # 改 .env 后必须重建，restart 无效
+docker exec admin-backend env | grep -i '^MAIL_'
+```
+
+验证是否真的能发出（容器内直接调后端发信函数）：
+
+```bash
+docker exec admin-backend python -c "from app.core.mailer import send_mail, build_code_mail; s, h = build_code_mail('123456', 'register'); print('投递结果 =', send_mail('收件邮箱@example.com', s, h))"
+```
+
+> **`MAIL_FROM` 必须与 `MAIL_USERNAME` 完全一致**：服务商会校验「信封发件人 == 登录账号」。
+> 另外 `${MAIL_FROM:-...}` 的 `:-` 在**值为空时也会取默认值**，旧版 compose 留空会变成
+> `noreply@example.com` 而被拒发（新版已写成 `${MAIL_FROM:-}`）。
+>
+> `.env` 若在 Windows 上编辑过，先 `sed -i 's/\r$//' .env` 去掉 CRLF——值里带上 `\r` 会让解析异常。
 
 ---
 

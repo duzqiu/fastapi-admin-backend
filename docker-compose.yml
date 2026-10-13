@@ -59,13 +59,21 @@ services:
       FIRST_SUPERUSER_PASSWORD: ${FIRST_SUPERUSER_PASSWORD:-admin123}
       FIRST_SUPERUSER_EMAIL: ${FIRST_SUPERUSER_EMAIL:-admin@example.com}
       FIRST_SUPERUSER_NICKNAME: ${FIRST_SUPERUSER_NICKNAME:-超级管理员}
-      # 用户中心邮件：不配 SMTP 时验证码只写日志
-      MAIL_ENABLED: ${MAIL_ENABLED:-false}
-      MAIL_HOST: ${MAIL_HOST:-smtp.example.com}
+      # 用户中心邮件：默认值已内置可用的 QQ 邮箱配置 —— 只拿本文件（不配 .env）就能发信。
+      # ⚠️ 注意：下面的默认值里含真实账号与授权码，而本文件会推送到 GitHub（凭据即公开）。
+      #    想覆盖/关闭：在 .env 里设同名变量（.env 的值优先），例如 MAIL_ENABLED=false。
+      #    在 QQ 邮箱后台重置授权码后，记得同步改这里与 .env.docker.example。
+      MAIL_ENABLED: ${MAIL_ENABLED:-true}
+      MAIL_HOST: ${MAIL_HOST:-smtp.qq.com}
       MAIL_PORT: ${MAIL_PORT:-465}
-      MAIL_USERNAME: ${MAIL_USERNAME:-}
-      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
-      MAIL_FROM: ${MAIL_FROM:-后台管理系统 <noreply@example.com>}
+      # 465 → true（隐式 TLS）；587（Gmail 等 STARTTLS）→ false。
+      # 这两项原先漏掉了，导致 .env 里写了也进不到容器，只能用代码默认值。
+      MAIL_USE_SSL: ${MAIL_USE_SSL:-true}
+      MAIL_TIMEOUT: ${MAIL_TIMEOUT:-10}
+      MAIL_USERNAME: ${MAIL_USERNAME:-duzqiu@qq.com}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-inblryakdtclbccj}
+      # 发件人必须与 MAIL_USERNAME 完全一致（QQ 会校验「信封发件人 == 登录账号」）
+      MAIL_FROM: ${MAIL_FROM:-duzqiu@qq.com}
       # 生产必须 false，否则验证码会回显在接口响应里
       EMAIL_CODE_DEBUG_RETURN: ${EMAIL_CODE_DEBUG_RETURN:-false}
       UPLOAD_DIR: ./data/uploads
