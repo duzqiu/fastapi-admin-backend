@@ -339,31 +339,18 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
 | Gmail | smtp.gmail.com | 587 | false（STARTTLS） |
 | 企业微信/腾讯企业邮 | smtp.exmail.qq.com | 465 | true |
 
-#### 在 Docker 里使用邮件（凭据已内置，零配置）
+#### 在 Docker 里启用邮件（在服务器上执行）
 
-`docker-compose.yml` 与 `.env.docker.example` 的默认值里**已内置可用的 QQ 邮箱配置**
-（开关 + `smtp.qq.com:465` + 账号 + 授权码 + 发件人），所以**新服务器只拿这一个 compose 文件就能发信**，
-不需要再准备 `.env`：
+要改的只有**服务器上与 `docker-compose.yml` 同目录的那份 `.env`**，Dockerfile / compose 都不用动
+（465 端口的 `MAIL_USE_SSL=true` 就是代码默认值）。环境变量**只在创建容器时注入**，所以改完必须
+**重建**——`docker compose restart` 不会重读 `.env`。
 
-```bash
-mkdir -p /opt/fastapi-admin && cd /opt/fastapi-admin
-# 只放 docker-compose.yml，直接起
-docker compose up -d --build
-docker exec admin-backend env | grep -i '^MAIL_'     # 能看到全部 8 个 MAIL_ 变量即生效
-```
-
-> ⚠️ **这意味着凭据是公开的**：这两个文件都会推送到 GitHub，任何能看到仓库的人都能用该邮箱发信。
-> 想降低风险，三选一：
-> ① 把仓库设为**私有**（注意：`build.context` 指向私有仓库时，构建需要额外提供凭据）；
-> ② 在 QQ 邮箱后台**重置授权码**（旧码立即失效），再同步修改 `docker-compose.yml` 与
-> `.env.docker.example` 两处；
-> ③ 换成一个专用的运行邮箱，与个人邮箱隔离。
+> ⚠️ **凭据不进仓库**：`docker-compose.yml` / `.env.docker.example` 都会推送到 GitHub，所以里面
+> **不含**授权码（`MAIL_USERNAME` 已填、`MAIL_PASSWORD` 留空）。授权码只写在服务器那份 `.env`
+> （本地则是项目根目录的 `.env`，两者都被 `.gitignore` 忽略）。
 >
-> 想临时关闭发信：在 `.env` 里写 `MAIL_ENABLED=false`（`.env` 的值优先于 compose 默认值）。
-
-> ⚠️ **旧 `.env` 会覆盖新默认值**：若部署目录里已有早前 `cp` 出来的 `.env`，其中的
-> `MAIL_ENABLED=false`、`MAIL_HOST=smtp.example.com` 会让邮件发不出去——删掉那几行即可
-> （`sed -i '/^MAIL_/d' .env`）。要换用自己的 SMTP，就在 `.env` 里追加同名变量：
+> ⚠️ 若服务器 `.env` 里已存在旧的 `MAIL_ENABLED=false` / `MAIL_HOST=smtp.example.com`，
+> 它们会覆盖 compose 的默认值导致发不出去，先清掉旧行再追加：
 
 ```bash
 cd /opt/fastapi-admin                                  # docker-compose.yml 所在目录
