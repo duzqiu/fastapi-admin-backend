@@ -1,11 +1,15 @@
-"""数据库初始化：建表 + 写入初始数据。
+"""数据库初始化：建表 + 补列 + 写入初始数据。
 
 在应用启动（lifespan）时调用，幂等，可重复执行。
 
-⚠️ `create_all()` **只建表、不改表**：老库升级到新代码后，模型里新增的列不会自动补上，
-一查就报 `column ... does not exist`（PostgreSQL）/ `no such column`（SQLite）——
-这类结构变更必须走 Alembic（`python -m alembic upgrade head`，见 README 第十一节）。
-这里只负责把这种「库比代码旧」的错误翻译成人话，不自己做 DDL。
+`create_all()` **只建表、不改表**，所以这里分两步走：
+1. `create_tables()` 建出缺失的表；
+2. `sync_missing_columns()` 把模型里新增、库里还没有的**列**补上
+   （见 app/db/schema_sync.py）—— 于是「拉代码 → 重建镜像 → 起服务」即可，
+   不需要任何人手工执行迁移命令。
+
+只加列能覆盖绝大多数「加字段」的迭代；改类型 / 删列 / 加约束这类变更仍要走
+Alembic（`python -m alembic upgrade head`，见 README 第十一节）。
 """
 
 from datetime import date
@@ -19,6 +23,7 @@ from app.core.logging import logger
 from app.core.security import hash_password
 from app.core.utils import generate_member_no, utcnow
 from app.db.base import Base
+from app.db.schema_sync import sync_missing_columns
 from app.db.session import SessionLocal, engine
 from app.models import (  # noqa: F401  确保模型已注册
     Countdown,
@@ -288,6 +293,9 @@ def init_db() -> None:
     """完整初始化流程。"""
     try:
         create_tables()
+        # 老库兜底：模型里新增、库里还没有的列，在这里补上（只加列）。
+        # 有它，「拉代码 → 重建镜像 → 起服务」就够了，不必手工跑迁移。
+        sync_missing_columns(engine)
         db = SessionLocal()
         try:
             create_initial_superuser(db)
@@ -298,8 +306,8 @@ def init_db() -> None:
     except SQLAlchemyError as error:
         if _is_outdated_schema(error):
             logger.error(
-                "数据库结构比代码旧：表里缺少 ORM 里已定义的列（%s）。\n"
-                "create_all() 只建表、不改表，新增列必须走迁移，请先执行：\n"
+                "数据库结构比代码旧（%s）。自动补列没能解决，多半是「变更不止于加列」"
+                "（改类型 / 删列 / 加约束）或当前库账号没有 DDL 权限，请用 Alembic 迁移：\n"
                 "    python -m alembic upgrade head\n"
                 "老库第一次接入 Alembic（库里还没有 alembic_version 表）的做法见 README 第十一节。",
                 error,

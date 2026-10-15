@@ -55,7 +55,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/system/health', timeout=4).status == 200 else 1)"
 
-# 先用单进程跑一次初始化（建表 + 初始数据），再启动多进程 uvicorn：
-# 应用启动时每个 worker 都会执行一次 init_db()，多进程并发「建表 / 写入初始数据」会互相踩，
+# 先用单进程跑一次初始化（建表 + 补齐新版本新增的列 + 初始数据），再启动多进程 uvicorn：
+# 应用启动时每个 worker 都会执行一次 init_db()，多进程并发「建表 / 补列 / 写入初始数据」会互相踩，
 # 提前初始化一次后，各 worker 的检查都会直接返回，不再产生写操作。
+# 顺带一提：老库升级时新增的列就是在这里被自动补上的，所以 `up -d --build` 之后无需手工迁移。
 CMD ["sh", "-c", "python scripts/init_db.py && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY:-2}"]

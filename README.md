@@ -129,7 +129,8 @@ fastapi-admin-backend/
 │   ├── db/                             ★ 数据访问基础设施
 │   │   ├── base.py                     SQLAlchemy DeclarativeBase
 │   │   ├── session.py                  引擎构建（自动适配 SQLite/PG/MySQL）、会话工厂、get_db
-│   │   └── init_db.py                  建表 + 初始管理员 + 演示会员/菜品数据（幂等）
+│   │   ├── schema_sync.py              ★ 启动时自动补齐「模型有、库里没有」的列（只加列）
+│   │   └── init_db.py                  建表 + 自动补列 + 初始管理员 + 演示会员/菜品数据（幂等）
 │   │
 │   ├── models/                         ★ ORM 模型层
 │   │   ├── mixins.py                   主键 / 时间戳 Mixin
@@ -245,9 +246,12 @@ Copy-Item .env.example .env
 ### 3. 初始化数据库
 
 ```powershell
-# 建表 + 创建管理员 + 写入演示会员/菜品数据（幂等，可重复执行）
+# 建表 + 自动补上模型里新增的列 + 创建管理员 + 写入演示会员/菜品数据（幂等，可重复执行）
 ./.venv/Scripts/python.exe scripts/init_db.py
 ```
+
+> 每次启动都会自动补齐「模型有、库里没有」的列（`app/db/schema_sync.py`），
+> 所以升级代码后**不需要手工跑迁移**，直接重启即可，见 [11.2](#112-给已有表补充新列)。
 
 默认会创建：
 
@@ -963,8 +967,14 @@ DROP TABLE IF EXISTS articles;
 
 ### 11.2 给已有表补充新列
 
-`create_all()` 同样**只建表、不改表**：新的模型字段不会自动加到已存在的表上，
-此时查询会报 `no such column`。二选一处理：
+`create_all()` 同样**只建表、不改表**：新的模型字段不会自动加到已存在的表上。
+不过**单纯加列不需要你做任何事** —— `init_db()` 里的 `sync_missing_columns()`
+（`app/db/schema_sync.py`）会在每次启动时把「模型里已定义、库里还没有」的列自动补上
+（只 `ADD COLUMN`，带 `NOT NULL DEFAULT`，不动已有数据），所以
+`python scripts/init_db.py` / 重启服务 / `docker compose up -d --build` 之后就自动好了，
+补了哪些列在日志里能看到。
+
+只有**「不止于加列」的变更**才需要手工处理，两种方式二选一：
 
 ```powershell
 # 方式一（推荐，可回溯）：用 Alembic 生成并执行增量迁移
@@ -1057,6 +1067,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ix_member_account_info_member_no
 | --- | --- |
 | `tests/test_api.py` | 健康检查、后台登录成功/失败、令牌校验、后台用户增删改查 |
 | `tests/test_storage.py` | 图片魔术字节识别（含 **HEIC / HEIF**）、HEIC → JPEG 转码（产物必须是真 JPEG）、坏文件要报业务错误 |
+| `tests/test_schema_sync.py` | 启动时自动补列：老库缺列能被补上且**旧数据不丢**、缺多列、结构已一致时不出 DDL（幂等）、空库跳过、NOT NULL 列造不出默认值时退化成可空列 |
 | `tests/test_member.py` | 验证码场景校验与冷却、注册（重复/错误码/弱密码）、**6 位会员编号（格式 / 唯一性 / 后台检索）**、会员登录与刷新、令牌作用域隔离、资料修改（**昵称 / 简介 / 性别 / 生日 / 地区一次改完，未传字段保持原值**；含**地区**字段）、**后台改同样字段**、**列表项带出可编辑字段（编辑保存不丢简介/手机号）**、**头像按会员 ID 分目录存放、并由资料接口 avatar_url 带出**（含未上传时回退默认头像）、头像上传（含非法文件）、**后台代传头像与按 ID 读取**、**背景图按会员 ID 分目录存放、由 background_url 带出（含覆盖上传只留一张、后台代传与按 ID 读取）**、**后台编辑地区字段**、修改密码、验证码重置密码、后台会员管理全流程 |
 | `tests/test_dish.py` | 分类/标签 CRUD、标签启用状态（`only_active` 过滤与 C 端隐藏）、菜品与套餐增删改、图片上传、点菜菜单浏览、下单（无套餐/有套餐）、库存与销量联动、起购/限购/每日限量/供应时段校验、取消订单回滚、后台订单状态流转、会员与管理员权限隔离 |
 
@@ -1212,21 +1223,18 @@ docker compose logs -f backend
 curl http://127.0.0.1:8000/api/v1/system/health
 ```
 
-首次启动会自动建表并写入初始管理员（`scripts/init_db.py` 幂等，可重复执行）。
-如果 PG 还没起来，入口会失败退出，`restart: unless-stopped` 会自动重试。
+首次启动会自动建表、**自动补齐新版本新增的列**，再写入初始管理员
+（`scripts/init_db.py` 幂等，可重复执行）。如果 PG 还没起来，入口会失败退出，
+`restart: unless-stopped` 会自动重试。
 
-> ⚠️ **`up -d --build` 只更新代码，不会升级表结构。** 库比代码旧时（新版本给已有的表加了列），
-> 入口会报 `column xxx does not exist`（PostgreSQL）/ `no such column`（SQLite）并退出。
-> 先补迁移再启动：
+> ✅ **更新版本只需 `docker compose up -d --build`，不需要任何手工迁移命令。**
+> 入口里的 `init_db()` 会先 `create_all()` 建缺失的表、再 `sync_missing_columns()`
+> 把模型里新增、库里还没有的列补上（只 `ADD COLUMN`，见 `app/db/schema_sync.py`），
+> 补了哪些列会写进日志，`docker compose logs backend` 里能直接看到。
 >
-> ```bash
-> docker exec -it admin-backend python -m alembic upgrade head
-> docker compose restart backend
-> ```
->
-> 若这个库从没接入过 Alembic（查一下有没有 `alembic_version` 表即可判断），
-> 先按[第十一节](#十一数据库结构版本管理alembic)的「已有数据库第一次接入」做一次
-> `alembic stamp`，再 `upgrade head`。
+> 只有**「不止于加列」的变更**（改类型 / 删列 / 加约束 / 数据回填）才需要 Alembic：
+> `docker compose run --rm backend python -m alembic upgrade head`
+> （老库第一次接入见[第十一节](#十一数据库结构版本管理alembic)）。
 
 #### 步骤 4：把本地 SQLite 的数据迁到 PG
 
@@ -1277,8 +1285,8 @@ docker compose run --rm \
 | 时段规则不对 | 容器默认 UTC，`TZ` 要设成 `Asia/Shanghai`（影响菜品「供应时段 / 每日限量」） |
 | 上传的图片想导出 | 已用命名卷 `uploads` 持久化：`docker cp admin-backend:/app/data/uploads ./` |
 | 改了 `.env` 不生效 | 变量只在创建容器时注入，需 `docker compose up -d --force-recreate` |
-| 更新到最新代码 | `docker compose up -d --build`（重新拉 GitHub 最新提交，数据卷不受影响）。⚠️ **表结构不会自动升级**：新版本若给已有的表加了列，启动时会报下面那行错误，需先补迁移 |
-| 启动 / 调接口报 `column member_account_info.background does not exist`（PG）或 `no such column`（SQLite） | 库比代码旧：`create_all()` 只建表、不改表，新增列必须走 Alembic。`docker exec -it admin-backend python -m alembic upgrade head` 后再 `docker compose restart backend`；老库第一次接入见[第十一节](#十一数据库结构版本管理alembic) |
+| 更新到最新代码 | `docker compose up -d --build`（重新拉 GitHub 最新提交，数据卷不受影响）。新版本新增的列会在启动时**自动补上**，无需手工迁移 |
+| 启动 / 调接口报 `column member_account_info.background does not exist`（PG）或 `no such column`（SQLite） | 库比代码旧。正常情况启动时已自动补列；若仍出现，多半是「变更不止于加列」或库账号缺 DDL 权限，用 Alembic：`docker compose run --rm backend python -m alembic upgrade head`，再 `docker compose restart backend`；老库第一次接入见[第十一节](#十一数据库结构版本管理alembic) |
 
 > **更推荐的生产做法（不绕宿主机）**：把两个容器接到同一个自定义网络，用容器名 + 容器内端口直连：
 >
