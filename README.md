@@ -1215,6 +1215,19 @@ curl http://127.0.0.1:8000/api/v1/system/health
 首次启动会自动建表并写入初始管理员（`scripts/init_db.py` 幂等，可重复执行）。
 如果 PG 还没起来，入口会失败退出，`restart: unless-stopped` 会自动重试。
 
+> ⚠️ **`up -d --build` 只更新代码，不会升级表结构。** 库比代码旧时（新版本给已有的表加了列），
+> 入口会报 `column xxx does not exist`（PostgreSQL）/ `no such column`（SQLite）并退出。
+> 先补迁移再启动：
+>
+> ```bash
+> docker exec -it admin-backend python -m alembic upgrade head
+> docker compose restart backend
+> ```
+>
+> 若这个库从没接入过 Alembic（查一下有没有 `alembic_version` 表即可判断），
+> 先按[第十一节](#十一数据库结构版本管理alembic)的「已有数据库第一次接入」做一次
+> `alembic stamp`，再 `upgrade head`。
+
 #### 步骤 4：把本地 SQLite 的数据迁到 PG
 
 应用启动只会**建表**，不会搬数据。PG 端口已映射到宿主机 `5452`，两种方式都行：
@@ -1264,7 +1277,8 @@ docker compose run --rm \
 | 时段规则不对 | 容器默认 UTC，`TZ` 要设成 `Asia/Shanghai`（影响菜品「供应时段 / 每日限量」） |
 | 上传的图片想导出 | 已用命名卷 `uploads` 持久化：`docker cp admin-backend:/app/data/uploads ./` |
 | 改了 `.env` 不生效 | 变量只在创建容器时注入，需 `docker compose up -d --force-recreate` |
-| 更新到最新代码 | `docker compose up -d --build`（重新拉 GitHub 最新提交，数据卷与表结构不受影响） |
+| 更新到最新代码 | `docker compose up -d --build`（重新拉 GitHub 最新提交，数据卷不受影响）。⚠️ **表结构不会自动升级**：新版本若给已有的表加了列，启动时会报下面那行错误，需先补迁移 |
+| 启动 / 调接口报 `column member_account_info.background does not exist`（PG）或 `no such column`（SQLite） | 库比代码旧：`create_all()` 只建表、不改表，新增列必须走 Alembic。`docker exec -it admin-backend python -m alembic upgrade head` 后再 `docker compose restart backend`；老库第一次接入见[第十一节](#十一数据库结构版本管理alembic) |
 
 > **更推荐的生产做法（不绕宿主机）**：把两个容器接到同一个自定义网络，用容器名 + 容器内端口直连：
 >

@@ -1,11 +1,17 @@
 """数据库初始化：建表 + 写入初始数据。
 
 在应用启动（lifespan）时调用，幂等，可重复执行。
+
+⚠️ `create_all()` **只建表、不改表**：老库升级到新代码后，模型里新增的列不会自动补上，
+一查就报 `column ... does not exist`（PostgreSQL）/ `no such column`（SQLite）——
+这类结构变更必须走 Alembic（`python -m alembic upgrade head`，见 README 第十一节）。
+这里只负责把这种「库比代码旧」的错误翻译成人话，不自己做 DDL。
 """
 
 from datetime import date
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -264,16 +270,41 @@ def create_initial_dishes(db: Session) -> None:
     )
 
 
+def _is_outdated_schema(error: SQLAlchemyError) -> bool:
+    """判断是不是「库里缺 ORM 里新加的列」——忘了跑迁移的典型症状。
+
+    三个方言的措辞不同，都认一下：PostgreSQL `column xxx does not exist`、
+    SQLite `no such column: xxx`、MySQL `Unknown column 'xxx'`。
+    """
+    text = str(getattr(error, "orig", error)).lower()
+    return (
+        "does not exist" in text
+        or "no such column" in text
+        or "unknown column" in text
+    )
+
+
 def init_db() -> None:
     """完整初始化流程。"""
-    create_tables()
-    db = SessionLocal()
     try:
-        create_initial_superuser(db)
-        create_initial_members(db)
-        create_initial_dishes(db)
-    finally:
-        db.close()
+        create_tables()
+        db = SessionLocal()
+        try:
+            create_initial_superuser(db)
+            create_initial_members(db)
+            create_initial_dishes(db)
+        finally:
+            db.close()
+    except SQLAlchemyError as error:
+        if _is_outdated_schema(error):
+            logger.error(
+                "数据库结构比代码旧：表里缺少 ORM 里已定义的列（%s）。\n"
+                "create_all() 只建表、不改表，新增列必须走迁移，请先执行：\n"
+                "    python -m alembic upgrade head\n"
+                "老库第一次接入 Alembic（库里还没有 alembic_version 表）的做法见 README 第十一节。",
+                error,
+            )
+        raise
 
 
 if __name__ == "__main__":
