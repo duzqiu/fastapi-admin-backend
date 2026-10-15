@@ -62,12 +62,14 @@ class Member(PKMixin, TimestampMixin, Base):
     # ---------- 个人资料 ----------
     nickname: Mapped[str] = mapped_column(String(50), default="", index=True, comment="昵称")
     avatar: Mapped[str] = mapped_column(String(255), default="", comment="头像地址")
+    background: Mapped[str] = mapped_column(String(255), default="", comment="背景图地址")
     gender: Mapped[str] = mapped_column(
         String(10), default=MemberGender.UNKNOWN.value, index=True, comment="性别"
     )
     birthday: Mapped[Optional[date]] = mapped_column(Date, nullable=True, comment="生日")
     phone: Mapped[str] = mapped_column(String(20), default="", comment="手机号")
     bio: Mapped[str] = mapped_column(String(255), default="", comment="个人简介")
+    region: Mapped[str] = mapped_column(String(64), default="", comment="地区")
 
     # ---------- 状态 ----------
     is_active: Mapped[bool] = mapped_column(

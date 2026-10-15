@@ -36,7 +36,7 @@
 | 能力 | 说明 |
 | --- | --- |
 | 后台账号认证鉴权 | 账号密码登录、JWT（access + refresh）、角色权限（admin / editor / user） |
-| 用户中心（会员） | 邮箱验证码注册（自动分配 6 位唯一会员编号）、登录、忘记密码、个人资料（昵称/头像/性别/生日/简介）、头像上传 |
+| 用户中心（会员） | 邮箱验证码注册（自动分配 6 位唯一会员编号）、登录、忘记密码、个人资料（昵称/头像/背景图/性别/生日/简介）、头像与背景图上传 |
 | 点菜菜单与订单 | 菜品（菜名/图片/价格/库存）、**多套餐与售卖规则**（起购 / 限购 / 每日限量 / 供应时段）、分类与标签、**销量统计**、下单与订单管理闭环 |
 | 通用后台 CRUD | 后台用户管理、**会员管理**（查看 / 修改 / 启禁用 / 重置密码 / 删除）、菜品管理、订单管理 |
 | 分层基础设施 | 统一配置、统一异常、统一分页、请求日志、跨域、邮件、文件上传、初始化与迁移脚本 |
@@ -165,7 +165,7 @@ fastapi-admin-backend/
 │   │   ├── user_service.py             后台账号 CRUD + 最后管理员保护等规则
 │   │   ├── email_code_service.py       验证码生成、限流、发送、校验
 │   │   ├── member_auth_service.py      会员：注册 / 登录 / 刷新 / 重置密码 / 改密
-│   │   ├── member_service.py           会员资料 + 头像上传 + 后台管理
+│   │   ├── member_service.py           会员资料 + 图片上传（头像 / 背景图）+ 后台管理
 │   │   ├── dish_service.py             分类 / 标签 / 菜品 / 套餐管理 + 点菜菜单查询
 │   │   ├── dish_order_service.py       下单校验、库存销量联动、取消回滚、状态流转、统计
 │   │   ├── system_service.py           健康检查 / 系统信息 / 首页统计
@@ -179,7 +179,7 @@ fastapi-admin-backend/
 │   │           ├── auth.py              /auth/*         后台账号登录、刷新、改密
 │   │           ├── users.py             /users/*        后台账号管理（仅管理员）
 │   │           ├── member_auth.py       /member/auth/*  用户中心：验证码、注册、登录、重置密码
-│   │           ├── member_profile.py    /member/*       用户中心：我的资料、头像、改密
+│   │           ├── member_profile.py    /member/*       用户中心：我的资料、头像 / 背景图、改密
 │   │           ├── members.py           /members/*      后台会员管理（仅管理员）
 │   │           ├── menu.py             /menu/*         点菜菜单：分类、菜品、下单、我的订单
 │   │           ├── dishes.py           /dishes/*       后台菜品 / 分类 / 标签管理
@@ -319,7 +319,7 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
 | `EMAIL_CODE_DEBUG_RETURN` | true | 是否在响应 `debug_code` 回显验证码（**生产必须 false**） |
 | `DEFAULT_AVATAR` | /api/v1/assets/default-avatar.svg | 会员注册后的默认头像地址（内置资源，由 `app/static` 托管） |
 | `UPLOAD_DIR` | ./data/uploads | 上传目录（相对路径以项目根目录为基准） |
-| `IMAGE_MAX_SIZE_MB` | 5 | 图片（会员头像 / 菜品图片）大小上限 |
+| `IMAGE_MAX_SIZE_MB` | 5 | 图片（会员头像 / 背景图 / 菜品图片）大小上限 |
 | `IMAGE_ALLOWED_EXTENSIONS` | jpg,jpeg,png,webp,gif | 允许的图片后缀 |
 
 生成随机密钥：
@@ -424,9 +424,10 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 | POST | `/member/auth/reset-password` | 忘记密码：入参 `email` `code` `new_password` `confirm_password` | 公开 |
 | GET | `/member/auth/me` | 当前登录会员 | 会员 |
 | POST | `/member/auth/logout` | 退出登录 | 会员 |
-| GET | `/member/profile` | 查看我的资料 | 会员 |
-| PUT | `/member/profile` | 修改昵称 / 头像 / 性别 / 生日 / 手机号 / 简介 | 会员 |
-| POST | `/member/profile/avatar` | 上传头像（multipart，≤2MB，jpg/png/webp/gif） | 会员 |
+| GET | `/member/profile` | 查看我的资料（含 `avatar_url` / `background_url`：可直接用的图片地址） | 会员 |
+| PUT | `/member/profile` | 修改昵称 / 头像 / 背景图 / 性别 / 生日 / 手机号 / 简介 / 地区 | 会员 |
+| POST | `/member/profile/avatar` | 上传头像（multipart，≤5MB，jpg/png/webp/gif） | 会员 |
+| POST | `/member/profile/background` | 上传背景图（multipart，≤5MB，与头像同一套存放规则） | 会员 |
 | POST | `/member/send-code` | 已登录获取「修改密码」邮箱验证码（邮箱取当前账号，无需传参） | 会员 |
 | POST | `/member/profile/change-password` | 修改密码：入参 `code` `new_password` `confirm_password` | 会员 |
 
@@ -436,8 +437,12 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 | --- | --- | --- |
 | GET | `/members` | 分页列表，支持 `keyword`（会员编号 / 邮箱 / 昵称 / 手机号）`gender` `is_active` `email_verified` `registered_after` `registered_before` |
 | GET | `/members/stats` | 会员统计（总数 / 启用 / 禁用 / 已验证 / 近 7 天新增 / 性别分布） |
-| GET | `/members/{id}` | 会员详情（含昵称、头像、性别、生日、年龄、手机号、简介） |
-| PUT | `/members/{id}` | 修改会员资料与启用状态 |
+| GET | `/members/{id}` | 会员详情（含昵称、头像、背景图、性别、生日、年龄、手机号、简介、地区） |
+| PUT | `/members/{id}` | 修改会员资料（含地区）与启用状态 |
+| POST | `/members/{id}/avatar` | 代会员上传头像（multipart，≤5MB，与会员自助上传同一套存放规则） |
+| GET | `/members/{id}/avatar` | 按**会员 ID** 读取头像（图片流；未上传返回系统默认头像） |
+| POST | `/members/{id}/background` | 代会员上传背景图（multipart，≤5MB） |
+| GET | `/members/{id}/background` | 按**会员 ID** 读取背景图（图片流；没上传过 → 404） |
 | PATCH | `/members/{id}/status` | 启用 / 禁用（禁用后立即无法登录，已签发令牌同步失效） |
 | PATCH | `/members/{id}/password` | 重置会员密码 |
 | DELETE | `/members/{id}` | 删除会员 |
@@ -454,7 +459,8 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/v1/static/avatars/{filename}` | 已上传的会员头像（由 `UPLOAD_DIR` 目录托管） |
+| GET | `/api/v1/static/avatars/{会员ID}/{filename}` | 已上传的会员头像（由 `UPLOAD_DIR` 目录托管，按会员 ID 分目录） |
+| GET | `/api/v1/static/backgrounds/{会员ID}/{filename}` | 已上传的会员背景图（同样按会员 ID 分目录） |
 
 > 挂在 API 前缀下，前端的 `/api` 代理与 Nginx 的 `/api` 反向代理可直接复用，无需额外配置静态资源规则。
 
@@ -484,7 +490,7 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 | 登录账号 | 用户名 | 邮箱 |
 | 权限 | admin / editor / user | 无后台权限，仅能操作自己的资料 |
 | 令牌 `scope` | `staff` | `member` |
-| 头衔/资料 | 昵称、角色、启用状态 | 6 位会员编号、昵称、头像、性别、生日、手机号、简介 |
+| 头衔/资料 | 昵称、角色、启用状态 | 6 位会员编号、昵称、头像、背景图、性别、生日、手机号、简介、地区 |
 
 **令牌隔离**：两个作用域的 JWT 互不通用。会员令牌访问 `/users`、`/members` 等后台接口会直接返回 401
 （错误码 40104「令牌使用范围不正确」），后台令牌访问 `/member/**` 同样被拒绝。
@@ -503,8 +509,10 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
    前端  ──POST /member/auth/login {email, password}──▶  access_token + refresh_token（scope=member）
 
 ③ 完善资料
-   PUT  /member/profile        昵称 / 头像地址 / 性别 / 生日 / 手机号 / 简介
-   POST /member/profile/avatar 上传头像文件 → 返回可访问 URL 并自动写入头像字段
+   PUT  /member/profile            昵称 / 头像地址 / 背景图地址 / 性别 / 生日 / 手机号 / 简介 / 地区
+   POST /member/profile/avatar     上传头像 → 返回可访问 URL 并自动写入头像字段
+   POST /member/profile/background 上传背景图 → 返回 URL 并写入背景图字段（同头像规则）
+   GET  /member/profile            出参 avatar_url / background_url = 可直接用的图片地址
 
 ④ 忘记密码（未登录）
    POST /member/auth/send-code      {email, scene:"reset_password"}  要求邮箱已注册
@@ -571,13 +579,41 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/member/auth/send-code `
 
 > **生产环境必须**：`MAIL_ENABLED=true` + `EMAIL_CODE_DEBUG_RETURN=false`。
 
-### 8.5 头像上传
+### 8.5 图片（头像 / 背景图）上传与读取
 
-- 接口：`POST /member/profile/avatar`（`multipart/form-data`，字段名 `file`）
+**存**：头像 `POST /member/profile/avatar`、背景图 `POST /member/profile/background`
+（会员自助），后台代传是 `POST /members/{会员ID}/avatar` 与
+`POST /members/{会员ID}/background`；均为 `multipart/form-data`、字段名 `file`
+
 - 校验：后缀白名单 + 大小上限 + **魔术字节校验**（防止改名的可执行文件）
-- 存储：`{UPLOAD_DIR}/avatars/avatar_{会员ID}_{随机串}.{ext}`
-- 访问：`{API_V1_PREFIX}/static/avatars/xxx.png`，例如 `/api/v1/static/avatars/avatar_1_ab12cd34ef56.png`
-- 清理：更新或删除会员时会自动移除旧的本地头像文件；路径穿越已做防护
+- 落盘：**一个会员一个目录，目录名就是会员 ID**
+
+  ```
+  data/uploads/avatars/1/avatar_1_ab12cd34ef56.png
+  data/uploads/backgrounds/1/background_1_ab12cd34ef56.png
+  ```
+
+- 覆盖上传会清掉该会员目录里的旧图（目录里只留当前这一张）；删除会员时整个目录一起清
+- 路径穿越已做防护：解析出的文件必须位于 `UPLOAD_DIR` 之内
+
+**读**：**会员侧不再单独提供「获取图片」接口**，地址由资料接口一起返回
+
+| 出参字段 | 出现于 | 说明 |
+| --- | --- | --- |
+| `avatar_url` | `GET /member/profile`、`GET /member/auth/me`、`GET /members/{会员ID}` | 可直接当 `<img src>` 用的头像地址 |
+| `background_url` | 同上 | 可直接用的背景图地址；**没上传过时是空串** |
+
+两个地址都是**以会员 ID 为维度**解析出来的：先按库里存的 `avatar` / `background`
+反推磁盘路径（外部链接直接跳过），找不到再到对应目录（`avatars/{会员ID}/`、
+`backgrounds/{会员ID}/`）里取最后写入的那张。区别只有一点：
+
+- 头像**有默认值**：都没上传过时等于 `DEFAULT_AVATAR`（`app/static/default-avatar.svg`）；
+- 背景图**没有默认值**：没上传就是空串，前端按「不铺背景图」处理。
+
+因为文件名里带随机串，重新上传后地址一定会变，客户端不会读到缓存的旧图；
+后台另保留两个直接取图片流的接口（管理员令牌）：`GET /members/{会员ID}/avatar`
+（拿不到时回退默认头像）与 `GET /members/{会员ID}/background`（拿不到 → 404），
+响应都带 `Cache-Control: no-cache`。
 
 ### 8.6 后台如何管理会员
 
@@ -585,21 +621,25 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/member/auth/send-code `
 
 - **查看**：列表支持 关键词（邮箱/昵称/手机号）、性别、启用状态、邮箱验证状态 组合筛选；
   点「详情」查看完整资料（含年龄、验证时间、最后登录、注册时间）。
-- **修改**：点「编辑」可改昵称、头像地址、性别、生日、手机号、简介与启用状态。
+- **修改**：点「编辑」可改昵称、头像地址、性别、生日、手机号、简介、地区与启用状态。
+  会员自助（`PUT /member/profile`）与后台代改（`PUT /members/{id}`）**可改字段一致**：
+  昵称 / 头像 / 性别 / 生日 / 手机号 / 简介 / 地区，均可选，**未传的字段保持原值**
+  （后台额外支持 `is_active`）。
+  注意：列表项也会带出这些可编辑字段，否则从列表点「编辑」原样保存会把没返回的字段清空。
 - **启用 / 禁用**：列表内开关一键切换。禁用后：无法登录，且**已签发的令牌立即失效**
   （每次请求都会校验会员状态）。
 - **重置密码**：管理员直接设置新密码，无需邮箱验证码。
-- **删除**：二次确认后删除会员及其本地头像文件。
+- **删除**：二次确认后删除会员及其本地图片文件（头像与背景图目录一起清）。
 
 ### 8.7 演示数据
 
 `python scripts/init_db.py` 会写入 3 个演示会员（表为空时才写入）：
 
-| 邮箱 | 昵称 | 性别 | 生日 | 状态 | 密码 |
-| --- | --- | --- | --- | --- | --- |
-| alice@example.com | Alice | 女 | 1996-05-20 | 启用 | members123 |
-| bob@example.com | Bob | 男 | 1992-11-03 | 启用 | members123 |
-| carol@example.com | Carol | 保密 | - | 禁用 | members123 |
+| 邮箱 | 昵称 | 性别 | 生日 | 地区 | 状态 | 密码 |
+| --- | --- | --- | --- | --- | --- | --- |
+| alice@example.com | Alice | 女 | 1996-05-20 | 上海 | 启用 | members123 |
+| bob@example.com | Bob | 男 | 1992-11-03 | 北京 | 启用 | members123 |
+| carol@example.com | Carol | 保密 | - | （未填） | 禁用 | members123 |
 
 ---
 
@@ -1011,7 +1051,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ix_member_account_info_member_no
 | 测试文件 | 覆盖点 |
 | --- | --- |
 | `tests/test_api.py` | 健康检查、后台登录成功/失败、令牌校验、后台用户增删改查 |
-| `tests/test_member.py` | 验证码场景校验与冷却、注册（重复/错误码/弱密码）、**6 位会员编号（格式 / 唯一性 / 后台检索）**、会员登录与刷新、令牌作用域隔离、资料修改、头像上传（含非法文件）、修改密码、验证码重置密码、后台会员管理全流程 |
+| `tests/test_member.py` | 验证码场景校验与冷却、注册（重复/错误码/弱密码）、**6 位会员编号（格式 / 唯一性 / 后台检索）**、会员登录与刷新、令牌作用域隔离、资料修改（**昵称 / 简介 / 性别 / 生日 / 地区一次改完，未传字段保持原值**；含**地区**字段）、**后台改同样字段**、**列表项带出可编辑字段（编辑保存不丢简介/手机号）**、**头像按会员 ID 分目录存放、并由资料接口 avatar_url 带出**（含未上传时回退默认头像）、头像上传（含非法文件）、**后台代传头像与按 ID 读取**、**背景图按会员 ID 分目录存放、由 background_url 带出（含覆盖上传只留一张、后台代传与按 ID 读取）**、**后台编辑地区字段**、修改密码、验证码重置密码、后台会员管理全流程 |
 | `tests/test_dish.py` | 分类/标签 CRUD、标签启用状态（`only_active` 过滤与 C 端隐藏）、菜品与套餐增删改、图片上传、点菜菜单浏览、下单（无套餐/有套餐）、库存与销量联动、起购/限购/每日限量/供应时段校验、取消订单回滚、后台订单状态流转、会员与管理员权限隔离 |
 
 ---

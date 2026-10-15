@@ -3,8 +3,9 @@
 from datetime import date, datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, EmailStr, Field, computed_field, field_validator, model_validator
 
+from app.core.member_media import resolve_avatar_url, resolve_background_url
 from app.models.member import MemberGender
 from app.schemas.common import ORMBaseModel
 
@@ -115,10 +116,12 @@ class MemberProfileUpdate(BaseModel):
 
     nickname: Optional[str] = Field(default=None, min_length=1, max_length=50)
     avatar: Optional[str] = Field(default=None, max_length=255)
+    background: Optional[str] = Field(default=None, max_length=255, description="背景图地址")
     gender: Optional[MemberGender] = None
     birthday: Optional[date] = None
     phone: Optional[str] = Field(default=None, max_length=20)
-    bio: Optional[str] = Field(default=None, max_length=255)
+    bio: Optional[str] = Field(default=None, max_length=255, description="个人简介")
+    region: Optional[str] = Field(default=None, max_length=64, description="地区")
 
     @field_validator("birthday")
     @classmethod
@@ -175,11 +178,13 @@ class MemberOut(ORMBaseModel):
     nickname: str
     display_name: str = ""
     avatar: str
+    background: str = Field(default="", description="背景图地址")
     gender: str
     birthday: Optional[date] = None
     age: Optional[int] = None
     phone: str
-    bio: str
+    bio: str = Field(default="", description="个人简介")
+    region: str = Field(default="", description="地区")
     is_active: bool
     email_verified: bool
     email_verified_at: Optional[datetime] = None
@@ -187,9 +192,33 @@ class MemberOut(ORMBaseModel):
     created_at: datetime
     updated_at: datetime
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def avatar_url(self) -> str:
+        """可直接访问的头像地址：有上传的头像就用它，否则是系统默认头像。
+
+        头像是按会员 ID 存、按会员 ID 读的，所以这里算出来的地址永远指向真实存在的
+        那张图 —— 前端拿它当 `<img src>` 即可，不用再单独调「读取头像」接口。
+        """
+        return resolve_avatar_url(self.id, self.avatar)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def background_url(self) -> str:
+        """可直接访问的背景图地址；**没上传过时是空串**（前端按「不铺图」处理）。
+
+        和头像一样按会员 ID 存、按会员 ID 读（`backgrounds/{会员ID}/`），所以这里
+        算出来的地址一定指向真实存在的那张图。
+        """
+        return resolve_background_url(self.id, self.background)
+
 
 class MemberListItem(ORMBaseModel):
-    """会员列表项。"""
+    """会员列表项。
+
+    后台列表页的「编辑」会把这一行原样回填到表单里再提交，所以**可编辑的资料字段
+    （手机号 / 简介 / 地区等）必须在这里出现**，否则一保存就会被清空。
+    """
 
     id: int
     member_no: str = ""
@@ -197,8 +226,12 @@ class MemberListItem(ORMBaseModel):
     nickname: str
     display_name: str = ""
     avatar: str
+    background: str = Field(default="", description="背景图地址")
     gender: str
     birthday: Optional[date] = None
+    phone: str = ""
+    bio: str = Field(default="", description="个人简介")
+    region: str = Field(default="", description="地区")
     is_active: bool
     email_verified: bool
     last_login_at: Optional[datetime] = None
@@ -216,9 +249,9 @@ class MemberStatsOut(BaseModel):
     gender_distribution: dict = Field(default_factory=dict)
 
 
-class AvatarUploadOut(BaseModel):
-    """头像上传结果。"""
+class MediaUploadOut(BaseModel):
+    """图片上传结果（头像 / 背景图共用）。"""
 
-    url: str = Field(..., description="可直接访问的头像地址")
+    url: str = Field(..., description="可直接访问的图片地址")
     filename: str
     size: int = Field(..., description="文件大小（字节）")

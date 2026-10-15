@@ -1,6 +1,7 @@
 """pytest 公共夹具：使用内存 SQLite，保证测试不污染开发数据。"""
 
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -22,7 +23,13 @@ os.environ["FIRST_SUPERUSER_PASSWORD"] = "admin123"
 os.environ["MAIL_ENABLED"] = "false"
 os.environ["EMAIL_CODE_DEBUG_RETURN"] = "true"
 os.environ["EMAIL_CODE_RESEND_SECONDS"] = "0"
-os.environ["UPLOAD_DIR"] = str(Path(tempfile.gettempdir()) / "fastapi_admin_test_uploads")
+# 上传目录**每次运行前清空**：它不在内存里，上一次跑留下的头像会被「按会员 ID 读头像」
+# 那条回退逻辑读到，导致本次「还没上传」的断言偶发失败。
+UPLOAD_DIR = Path(tempfile.gettempdir()) / "fastapi_admin_test_uploads"
+if UPLOAD_DIR.exists():
+    shutil.rmtree(UPLOAD_DIR, ignore_errors=True)
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+os.environ["UPLOAD_DIR"] = str(UPLOAD_DIR)
 
 from app.core.security import hash_password  # noqa: E402
 from app.db.base import Base  # noqa: E402

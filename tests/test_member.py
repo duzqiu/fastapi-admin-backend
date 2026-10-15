@@ -266,6 +266,319 @@ def test_avatar_upload(client):
     assert bad_ext.status_code == 400
 
 
+def test_avatar_stored_and_returned_by_profile(client):
+    """头像按会员 ID 分目录存放，并由「查看我的资料」接口的 avatar_url 带出来。"""
+    from app.core.config import settings
+
+    member = _register(client, "avatar02@example.com")
+    member_id = member["id"]
+    headers = _member_headers(client, "avatar02@example.com")
+
+    # 1x1 透明 PNG
+    png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+        "890000000a49444154789c6360000002000100ffff03000006000557bfabd400"
+        "00000049454e44ae426082"
+    )
+
+    # 还没上传：资料接口给出的就是系统默认头像地址
+    profile = client.get(f"{MEMBER_API}/profile", headers=headers).json()
+    assert profile["avatar_url"] == settings.DEFAULT_AVATAR
+
+    # 上传：URL 与磁盘位置都以会员 ID 为维度
+    ok = client.post(
+        f"{MEMBER_API}/profile/avatar",
+        headers=headers,
+        files={"file": ("a.png", png, "image/png")},
+    )
+    assert ok.status_code == 200, ok.text
+    body = ok.json()
+    assert f"/avatars/{member_id}/" in body["url"]
+    directory = settings.upload_dir / "avatars" / str(member_id)
+    assert directory.is_dir(), f"头像应放在 {directory}"
+    assert (directory / body["filename"]).is_file()
+
+    # 资料接口带出的 avatar_url 指向刚上传那张，且真的能取到图片
+    profile = client.get(f"{MEMBER_API}/profile", headers=headers).json()
+    assert f"/avatars/{member_id}/" in profile["avatar_url"]
+    assert profile["avatar_url"] == body["url"]
+    image = client.get(profile["avatar_url"])
+    assert image.status_code == 200
+    assert image.content == png
+
+    # 旧的「读取头像」接口已移除（头像地址统一由资料接口给出）
+    assert client.get(f"{MEMBER_API}/profile/avatar", headers=headers).status_code == 405
+    assert client.get(f"{MEMBER_API}/avatar/{member_id}", headers=headers).status_code == 404
+
+
+def test_background_stored_and_returned_by_profile(client, auth_headers):
+    """背景图：与头像同一套规则 —— 按会员 ID 分目录存，资料接口的 background_url 带出。"""
+    from app.core.config import settings
+
+    member = _register(client, "bg01@example.com")
+    member_id = member["id"]
+    headers = _member_headers(client, "bg01@example.com")
+
+    png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+        "890000000a49444154789c6360000002000100ffff03000006000557bfabd400"
+        "00000049454e44ae426082"
+    )
+
+    # 还没上传：背景没有默认图，background_url 是空串
+    profile = client.get(f"{MEMBER_API}/profile", headers=headers).json()
+    assert profile["background"] == ""
+    assert profile["background_url"] == ""
+
+    # 上传：目录以会员 ID 命名
+    ok = client.post(
+        f"{MEMBER_API}/profile/background",
+        headers=headers,
+        files={"file": ("bg.png", png, "image/png")},
+    )
+    assert ok.status_code == 200, ok.text
+    body = ok.json()
+    assert f"/backgrounds/{member_id}/" in body["url"]
+    directory = settings.upload_dir / "backgrounds" / str(member_id)
+    assert (directory / body["filename"]).is_file()
+
+    # 资料接口带出的 background_url 指向刚上传那张，且真的能取到
+    profile = client.get(f"{MEMBER_API}/profile", headers=headers).json()
+    assert profile["background_url"] == body["url"]
+    assert client.get(profile["background_url"]).content == png
+
+    # 覆盖上传：目录里只留最新一张
+    ok2 = client.post(
+        f"{MEMBER_API}/profile/background",
+        headers=headers,
+        files={"file": ("bg2.png", png, "image/png")},
+    )
+    assert ok2.status_code == 200
+    assert len([item for item in directory.iterdir() if item.is_file()]) == 1
+    assert client.get(f"{MEMBER_API}/profile", headers=headers).json()[
+        "background_url"
+    ] == ok2.json()["url"]
+
+    # 后台代传：同一个会员目录，且后台详情带出的地址与会员侧一致
+    admin_ok = client.post(
+        f"{API}/members/{member_id}/background",
+        headers=auth_headers,
+        files={"file": ("bg3.png", png, "image/png")},
+    )
+    assert admin_ok.status_code == 200, admin_ok.text
+    assert f"/backgrounds/{member_id}/" in admin_ok.json()["url"]
+    detail = client.get(f"{API}/members/{member_id}", headers=auth_headers).json()
+    assert detail["background_url"] == admin_ok.json()["url"]
+    # 后台可以直接取图片流；会员令牌不能调后台接口
+    assert client.get(
+        f"{API}/members/{member_id}/background", headers=auth_headers
+    ).content == png
+    assert (
+        client.post(
+            f"{API}/members/{member_id}/background",
+            headers=headers,
+            files={"file": ("bg.png", png, "image/png")},
+        ).status_code
+        == 401
+    )
+
+
+def test_profile_update_nickname_bio_gender_birthday_region(client):
+    """修改资料接口一次可改：昵称 / 简介 / 性别 / 生日 / 地区；未传的字段保持原值。"""
+    member = _register(client, "profile02@example.com")
+    assert member["region"] == ""
+    headers = _member_headers(client, "profile02@example.com")
+
+    payload = {
+        "nickname": "七七",
+        "bio": "爱做饭的程序员",
+        "gender": "female",
+        "birthday": "1995-08-08",
+        "region": "苏州",
+    }
+    updated = client.put(f"{MEMBER_API}/profile", headers=headers, json=payload)
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert body["nickname"] == "七七"
+    assert body["bio"] == "爱做饭的程序员"
+    assert body["gender"] == "female"
+    assert body["birthday"] == "1995-08-08"
+    assert body["region"] == "苏州"
+
+    # 回读：GET /member/profile 拿到的就是改后的值
+    profile = client.get(f"{MEMBER_API}/profile", headers=headers).json()
+    assert profile["nickname"] == "七七"
+    assert profile["bio"] == "爱做饭的程序员"
+    assert profile["gender"] == "female"
+    assert profile["birthday"] == "1995-08-08"
+    assert profile["region"] == "苏州"
+
+    # 只改一个字段时，其余字段保持原值
+    only = client.put(f"{MEMBER_API}/profile", headers=headers, json={"region": "南京"})
+    assert only.status_code == 200, only.text
+    assert only.json()["region"] == "南京"
+    assert only.json()["bio"] == "爱做饭的程序员"
+    assert only.json()["nickname"] == "七七"
+    assert only.json()["gender"] == "female"
+
+
+def test_admin_update_profile_fields(client, auth_headers):
+    """后台修改资料同样支持：昵称 / 简介 / 性别 / 生日 / 地区（外加启用状态）。"""
+    member = _register(client, "adminprofile01@example.com")
+    member_id = member["id"]
+
+    updated = client.put(
+        f"{API}/members/{member_id}",
+        headers=auth_headers,
+        json={
+            "nickname": "后台改名",
+            "bio": "后台写的简介",
+            "gender": "male",
+            "birthday": "1990-02-02",
+            "region": "重庆",
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert body["nickname"] == "后台改名"
+    assert body["bio"] == "后台写的简介"
+    assert body["gender"] == "male"
+    assert body["birthday"] == "1990-02-02"
+    assert body["region"] == "重庆"
+
+    # 会员侧看到的是同一份资料
+    headers = _member_headers(client, "adminprofile01@example.com")
+    assert client.get(f"{MEMBER_API}/profile", headers=headers).json()["region"] == "重庆"
+
+
+def test_member_list_item_keeps_editable_fields(client, auth_headers):
+    """后台列表项必须带出可编辑字段：从列表点「编辑」原样保存时，简介/手机号不能被清空。"""
+    member = _register(client, "listitem01@example.com")
+    headers = _member_headers(client, "listitem01@example.com")
+    client.put(
+        f"{MEMBER_API}/profile",
+        headers=headers,
+        json={"phone": "13800000000", "bio": "列表别把我弄丢", "region": "西安"},
+    )
+
+    item = client.get(
+        f"{API}/members", headers=auth_headers, params={"keyword": "listitem01"}
+    ).json()["items"][0]
+    assert item["phone"] == "13800000000"
+    assert item["bio"] == "列表别把我弄丢"
+    assert item["region"] == "西安"
+
+    # 模拟后台「编辑」：把列表项原样回填并提交
+    saved = client.put(
+        f"{API}/members/{item['id']}",
+        headers=auth_headers,
+        json={
+            "nickname": item["nickname"],
+            "gender": item["gender"],
+            "birthday": item["birthday"],
+            "phone": item["phone"],
+            "region": item["region"],
+            "bio": item["bio"],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["bio"] == "列表别把我弄丢"
+    assert saved.json()["phone"] == "13800000000"
+
+
+def test_profile_region(client):
+    """资料新增「地区」字段：注册默认为空，可改、可回读，超长报错。"""
+    member = _register(client, "region01@example.com")
+    assert member["region"] == ""
+    headers = _member_headers(client, "region01@example.com")
+
+    updated = client.put(f"{MEMBER_API}/profile", headers=headers, json={"region": "杭州"})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["region"] == "杭州"
+
+    # 超过 64 字符 -> 422
+    too_long = client.put(f"{MEMBER_API}/profile", headers=headers, json={"region": "杭" * 65})
+    assert too_long.status_code == 422
+
+
+def test_admin_upload_and_read_avatar_by_member_id(client, auth_headers):
+    """后台：按会员 ID 上传 / 读取头像（与会员自助上传同一套存放规则）。"""
+    from app.core.config import settings
+
+    member = _register(client, "adminavatar01@example.com")
+    member_id = member["id"]
+
+    # 1x1 透明 PNG
+    png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+        "890000000a49444154789c6360000002000100ffff03000006000557bfabd400"
+        "00000049454e44ae426082"
+    )
+
+    # 未上传：后台读头像退回系统默认头像
+    before = client.get(f"{API}/members/{member_id}/avatar", headers=auth_headers)
+    assert before.status_code == 200
+    assert "svg" in before.headers["content-type"]
+
+    # 上传：以会员 ID 为维度落盘
+    ok = client.post(
+        f"{API}/members/{member_id}/avatar",
+        headers=auth_headers,
+        files={"file": ("a.png", png, "image/png")},
+    )
+    assert ok.status_code == 200, ok.text
+    body = ok.json()
+    assert f"/avatars/{member_id}/" in body["url"]
+    directory = settings.upload_dir / "avatars" / str(member_id)
+    assert (directory / body["filename"]).is_file()
+
+    # 按会员 ID 读回来就是刚上传那张
+    after = client.get(f"{API}/members/{member_id}/avatar", headers=auth_headers)
+    assert after.status_code == 200
+    assert after.content == png
+
+    # 会员侧资料接口带出的 avatar_url 指向同一张（两端共用一份文件）
+    member_headers = _member_headers(client, "adminavatar01@example.com")
+    profile = client.get(f"{MEMBER_API}/profile", headers=member_headers).json()
+    assert f"/avatars/{member_id}/" in profile["avatar_url"]
+    assert client.get(profile["avatar_url"]).content == png
+
+    # 后台详情同样带出 avatar_url
+    detail = client.get(f"{API}/members/{member_id}", headers=auth_headers).json()
+    assert detail["avatar_url"] == profile["avatar_url"]
+
+    # 后台接口不接受会员令牌；会员不存在 -> 404
+    assert (
+        client.post(
+            f"{API}/members/{member_id}/avatar",
+            headers=member_headers,
+            files={"file": ("a.png", png, "image/png")},
+        ).status_code
+        == 401
+    )
+    assert client.get(f"{API}/members/999999/avatar", headers=auth_headers).status_code == 404
+
+
+def test_admin_update_region(client, auth_headers):
+    """后台可编辑「地区」字段。"""
+    member = _register(client, "adminregion01@example.com")
+    member_id = member["id"]
+
+    updated = client.put(
+        f"{API}/members/{member_id}",
+        headers=auth_headers,
+        json={"nickname": member["nickname"], "region": "成都"},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["region"] == "成都"
+
+    # 列表也带出地区
+    listed = client.get(
+        f"{API}/members", headers=auth_headers, params={"keyword": "adminregion01"}
+    ).json()
+    assert listed["items"][0]["region"] == "成都"
+
+
 def test_change_password(client):
     _register(client, "chpwd01@example.com")
     headers = _member_headers(client, "chpwd01@example.com")

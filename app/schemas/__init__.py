@@ -43,7 +43,7 @@ from app.schemas.dish_order import (
 )
 from app.schemas.email import SendCodeRequest, SendCodeResponse
 from app.schemas.member import (
-    AvatarUploadOut,
+    MediaUploadOut,
     MemberAdminUpdate,
     MemberChangePassword,
     MemberListItem,
@@ -108,7 +108,7 @@ __all__ = [
     "OrderStatusUpdate",
     "SendCodeRequest",
     "SendCodeResponse",
-    "AvatarUploadOut",
+    "MediaUploadOut",
     "MemberAdminUpdate",
     "MemberChangePassword",
     "MemberListItem",

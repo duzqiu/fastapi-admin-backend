@@ -36,6 +36,7 @@ DEFAULT_MEMBERS = [
         "birthday": date(1996, 5, 20),
         "phone": "13800000001",
         "bio": "喜欢读书和徒步，正在学习 FastAPI。",
+        "region": "上海",
         "is_active": True,
     },
     {
@@ -45,6 +46,7 @@ DEFAULT_MEMBERS = [
         "birthday": date(1992, 11, 3),
         "phone": "13800000002",
         "bio": "后端工程师，关注分层架构与数据库设计。",
+        "region": "北京",
         "is_active": True,
     },
     {
@@ -54,6 +56,7 @@ DEFAULT_MEMBERS = [
         "birthday": None,
         "phone": "",
         "bio": "刚注册，还没来得及完善资料。",
+        "region": "",
         "is_active": False,
     },
 ]
@@ -116,6 +119,7 @@ def create_initial_members(db: Session) -> None:
                 birthday=item["birthday"],
                 phone=item["phone"],
                 bio=item["bio"],
+                region=item["region"],
                 is_active=item["is_active"],
                 email_verified=True,
                 email_verified_at=utcnow(),
