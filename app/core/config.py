@@ -92,7 +92,9 @@ class Settings(BaseSettings):
     # 相对路径以「项目根目录」为基准
     UPLOAD_DIR: str = "./data/uploads"
     IMAGE_MAX_SIZE_MB: int = 5
-    IMAGE_ALLOWED_EXTENSIONS: str = "jpg,jpeg,png,webp,gif"
+    # heic / heif 是 iPhone 相机的默认格式：放行上传，但**落盘前会转成 JPEG**
+    # （见 app/core/storage.py 的 `heif_to_jpeg` —— 浏览器与 Flutter 都渲染不了 HEIC）。
+    IMAGE_ALLOWED_EXTENSIONS: str = "jpg,jpeg,png,webp,gif,heic,heif"
 
     @property
     def cors_origins(self) -> List[str]:

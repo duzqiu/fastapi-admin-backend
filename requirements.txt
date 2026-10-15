@@ -20,6 +20,10 @@ bcrypt==4.2.1
 psycopg[binary]>=3.2.3        # PostgreSQL 驱动（SQLAlchemy URL: postgresql+psycopg://）
 PyMySQL==1.1.1                # MySQL 驱动（SQLAlchemy URL: mysql+pymysql://）
 
+# ===== 图片处理 =====
+pillow>=10.3.0                # 图片解码（HEIC 转 JPEG 也走它）
+pillow-heif>=0.18.0           # iPhone 的 HEIC / HEIF 支持（见 app/core/storage.py）
+
 # ===== 其他 =====
 python-multipart==0.0.20      # OAuth2 表单登录 / 文件上传
 python-dotenv==1.0.1

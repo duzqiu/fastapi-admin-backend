@@ -5,6 +5,8 @@
 
 import re
 
+import pytest
+
 API = "/api/v1"
 MEMBER_API = f"{API}/member"
 
@@ -381,6 +383,49 @@ def test_background_stored_and_returned_by_profile(client, auth_headers):
         ).status_code
         == 401
     )
+
+
+def test_iphone_heic_avatar_converted_to_jpeg(client):
+    """iPhone 拍的 HEIC 头像：接口照收，但**落盘一定是 JPEG**（HEIC 哪儿都渲染不了）。"""
+    import io
+
+    from PIL import Image
+
+    from app.core.config import settings
+
+    pytest.importorskip("pillow_heif")
+
+    member = _register(client, "heic01@example.com")
+    member_id = member["id"]
+    headers = _member_headers(client, "heic01@example.com")
+
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+    buffer = io.BytesIO()
+    Image.new("RGB", (64, 48), (200, 100, 50)).save(buffer, format="HEIF")
+    heic = buffer.getvalue()
+
+    ok = client.post(
+        f"{MEMBER_API}/profile/avatar",
+        headers=headers,
+        # 后缀故意用大写：iOS 给的文件名经常是 `IMG_0001.HEIC`
+        files={"file": ("IMG_0001.HEIC", heic, "image/heic")},
+    )
+    assert ok.status_code == 200, ok.text
+    body = ok.json()
+    assert body["url"].endswith(".jpg"), body
+
+    stored = settings.upload_dir / "avatars" / str(member_id) / body["filename"]
+    content = stored.read_bytes()
+    assert content.startswith(b"\xff\xd8\xff"), "落盘文件必须是 JPEG"
+    with Image.open(io.BytesIO(content)) as image:
+        assert image.format == "JPEG"
+
+    # 资料接口带出的地址指向这张 JPEG，且能直接取到
+    profile = client.get(f"{MEMBER_API}/profile", headers=headers).json()
+    assert profile["avatar_url"] == body["url"]
+    assert client.get(profile["avatar_url"]).content == content
 
 
 def test_profile_update_nickname_bio_gender_birthday_region(client):

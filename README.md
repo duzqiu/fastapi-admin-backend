@@ -320,7 +320,7 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
 | `DEFAULT_AVATAR` | /api/v1/assets/default-avatar.svg | 会员注册后的默认头像地址（内置资源，由 `app/static` 托管） |
 | `UPLOAD_DIR` | ./data/uploads | 上传目录（相对路径以项目根目录为基准） |
 | `IMAGE_MAX_SIZE_MB` | 5 | 图片（会员头像 / 背景图 / 菜品图片）大小上限 |
-| `IMAGE_ALLOWED_EXTENSIONS` | jpg,jpeg,png,webp,gif | 允许的图片后缀 |
+| `IMAGE_ALLOWED_EXTENSIONS` | jpg,jpeg,png,webp,gif,heic,heif | 允许的图片后缀（**heic/heif 落盘前会转成 JPEG**，见 8.5） |
 
 生成随机密钥：
 
@@ -426,7 +426,7 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 | POST | `/member/auth/logout` | 退出登录 | 会员 |
 | GET | `/member/profile` | 查看我的资料（含 `avatar_url` / `background_url`：可直接用的图片地址） | 会员 |
 | PUT | `/member/profile` | 修改昵称 / 头像 / 背景图 / 性别 / 生日 / 手机号 / 简介 / 地区 | 会员 |
-| POST | `/member/profile/avatar` | 上传头像（multipart，≤5MB，jpg/png/webp/gif） | 会员 |
+| POST | `/member/profile/avatar` | 上传头像（multipart，≤5MB，jpg/png/webp/gif/heic/heif） | 会员 |
 | POST | `/member/profile/background` | 上传背景图（multipart，≤5MB，与头像同一套存放规则） | 会员 |
 | POST | `/member/send-code` | 已登录获取「修改密码」邮箱验证码（邮箱取当前账号，无需传参） | 会员 |
 | POST | `/member/profile/change-password` | 修改密码：入参 `code` `new_password` `confirm_password` | 会员 |
@@ -586,6 +586,11 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/member/auth/send-code `
 `POST /members/{会员ID}/background`；均为 `multipart/form-data`、字段名 `file`
 
 - 校验：后缀白名单 + 大小上限 + **魔术字节校验**（防止改名的可执行文件）
+- **iPhone 的 HEIC / HEIF**：后缀与识别都放行，但**落盘前一律转成 JPEG**
+  （`app/core/storage.py` 的 `heif_to_jpeg`，依赖 `pillow-heif`）—— 浏览器（后台
+  `<img>`）和 Flutter（App 的 `ft.Image`）都渲染不了 HEIC，直接存下来等于「传上去了
+  但哪儿都看不见」。转出的 JPEG 按 88/75/60 逐档降质量压到 5MB 以内，EXIF 旋转也会
+  一并纠正；转不了则报「HEIC 图片解析失败，请换一张或先转成 JPG」。
 - 落盘：**一个会员一个目录，目录名就是会员 ID**
 
   ```
@@ -1051,6 +1056,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ix_member_account_info_member_no
 | 测试文件 | 覆盖点 |
 | --- | --- |
 | `tests/test_api.py` | 健康检查、后台登录成功/失败、令牌校验、后台用户增删改查 |
+| `tests/test_storage.py` | 图片魔术字节识别（含 **HEIC / HEIF**）、HEIC → JPEG 转码（产物必须是真 JPEG）、坏文件要报业务错误 |
 | `tests/test_member.py` | 验证码场景校验与冷却、注册（重复/错误码/弱密码）、**6 位会员编号（格式 / 唯一性 / 后台检索）**、会员登录与刷新、令牌作用域隔离、资料修改（**昵称 / 简介 / 性别 / 生日 / 地区一次改完，未传字段保持原值**；含**地区**字段）、**后台改同样字段**、**列表项带出可编辑字段（编辑保存不丢简介/手机号）**、**头像按会员 ID 分目录存放、并由资料接口 avatar_url 带出**（含未上传时回退默认头像）、头像上传（含非法文件）、**后台代传头像与按 ID 读取**、**背景图按会员 ID 分目录存放、由 background_url 带出（含覆盖上传只留一张、后台代传与按 ID 读取）**、**后台编辑地区字段**、修改密码、验证码重置密码、后台会员管理全流程 |
 | `tests/test_dish.py` | 分类/标签 CRUD、标签启用状态（`only_active` 过滤与 C 端隐藏）、菜品与套餐增删改、图片上传、点菜菜单浏览、下单（无套餐/有套餐）、库存与销量联动、起购/限购/每日限量/供应时段校验、取消订单回滚、后台订单状态流转、会员与管理员权限隔离 |
 
