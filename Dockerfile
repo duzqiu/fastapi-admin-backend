@@ -3,18 +3,20 @@
 # 构建：docker build -t fastapi-admin-backend:1.0.0 .
 # 运行：见 README 第 13.5 节，或直接用同目录的 docker-compose.yml
 #
-# —— 三个构建参数，专治「网络受限 / 镜像源不可用」，默认值与官方源一致，
-#    正常网络下无需传参，行为与之前完全相同 ——
+# —— 三个构建参数，专治「网络受限 / 镜像源不可用」，正常网络下无需传参直接用 ——
 #   PYTHON_IMAGE   基础镜像。填「完整仓库地址」可绕过 Docker daemon 里失效的加速器：
 #                    docker build --build-arg PYTHON_IMAGE=docker.m.daocloud.io/library/python:3.13-slim .
-#   APT_MIRROR     Debian 软件源（装 tzdata 用），如 https://mirrors.aliyun.com/debian
-#   PIP_INDEX_URL  PyPI 源（装 requirements.txt 用），如 https://pypi.tuna.tsinghua.edu.cn/simple
+#   APT_MIRROR     Debian 软件源（装 tzdata 用），默认留空（走镜像自带 deb.debian.org），
+#                   可填 https://mirrors.aliyun.com/debian
+#   PIP_INDEX_URL  PyPI 源（装 requirements.txt 用），**默认阿里云**
+#                    https://mirrors.aliyun.com/pypi/simple/ ；
+#                   要换回官方源就显式传 https://pypi.org/simple
 ARG PYTHON_IMAGE=python:3.13-slim
 FROM ${PYTHON_IMAGE}
 
 # FROM 之后需要重新声明才能在这个阶段里使用
 ARG APT_MIRROR=
-ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -37,7 +39,7 @@ RUN if [ -n "$APT_MIRROR" ]; then \
 
 # 先装依赖，源码变动时可复用这一层缓存
 COPY requirements.txt ./
-RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL:-https://pypi.org/simple}" -r requirements.txt
+RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}" -r requirements.txt
 
 COPY . .
 

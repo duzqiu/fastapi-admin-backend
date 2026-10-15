@@ -26,7 +26,7 @@ services:
       args:
         PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.13-slim}
         APT_MIRROR: ${APT_MIRROR:-}
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
     image: fastapi-admin-backend:1.0.0
     # 关键：明确「本地构建，不要拉取」。
     # 默认策略是 missing（镜像不在本地就先去仓库拉），于是会出现 `backend Pulling`
