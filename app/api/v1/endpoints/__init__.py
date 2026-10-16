@@ -9,6 +9,8 @@ from app.api.v1.endpoints import (
     member_profile,
     members,
     menu,
+    resume,
+    resume_public,
     system,
     users,
 )
@@ -22,6 +24,8 @@ __all__ = [
     "member_profile",
     "members",
     "menu",
+    "resume",
+    "resume_public",
     "system",
     "users",
 ]
