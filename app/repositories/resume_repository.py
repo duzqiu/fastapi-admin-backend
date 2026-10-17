@@ -19,6 +19,7 @@ from app.models.resume import (
     ResumeEvaluation,
     ResumePersonalInfo,
     ResumeProject,
+    ResumeSkillTag,
     ResumeWork,
 )
 from app.repositories.base import BaseRepository
@@ -302,6 +303,8 @@ class ResumeProjectRepository(BaseRepository[ResumeProject]):
                     ResumeProject.name.like(like),
                     ResumeProject.role.like(like),
                     ResumeProject.description.like(like),
+                    ResumeProject.duty.like(like),
+                    ResumeProject.achievement.like(like),
                 )
             )
         if work_id:
@@ -437,10 +440,94 @@ class ResumeEvaluationRepository(BaseRepository[ResumeEvaluation]):
         )
 
 
+class ResumeSkillTagRepository(BaseRepository[ResumeSkillTag]):
+    """技能标签数据访问对象。"""
+
+    def __init__(self, db: Session) -> None:
+        super().__init__(ResumeSkillTag, db)
+
+    def search(
+        self,
+        *,
+        keyword: Optional[str] = None,
+        category: Optional[str] = None,
+        personal_info_id: Optional[int] = None,
+        is_active: Optional[bool] = None,
+        offset: int = 0,
+        limit: int = 10,
+    ) -> Tuple[List[ResumeSkillTag], int]:
+        """按条件分页搜索技能标签（关键字同时搜姓名 / 分类 / 标签内容）。"""
+        conditions: List[Any] = []
+
+        if keyword:
+            like = f"%{keyword.strip()}%"
+            conditions.append(
+                or_(
+                    ResumeSkillTag.name.like(like),
+                    ResumeSkillTag.category.like(like),
+                    ResumeSkillTag.tags.like(like),
+                )
+            )
+        if category:
+            conditions.append(ResumeSkillTag.category == category)
+        if personal_info_id:
+            conditions.append(ResumeSkillTag.personal_info_id == personal_info_id)
+        if is_active is not None:
+            conditions.append(ResumeSkillTag.is_active == is_active)
+
+        return self.list(
+            conditions=conditions,
+            order_by=[ResumeSkillTag.sort.asc(), ResumeSkillTag.id.asc()],
+            offset=offset,
+            limit=limit,
+        )
+
+    def delete_by_personal_info(self, personal_info_id: int) -> int:
+        """删除某个个人信息名下的全部技能标签（级联删除用）。"""
+        return _delete_where(
+            self.db, ResumeSkillTag, ResumeSkillTag.personal_info_id == personal_info_id
+        )
+
+    def update_name_by_personal_info(self, personal_info_id: int, name: str) -> int:
+        """个人信息改名后，同步其名下技能标签里冗余的姓名。"""
+        return _update_where(
+            self.db,
+            ResumeSkillTag,
+            {"name": name},
+            ResumeSkillTag.personal_info_id == personal_info_id,
+        )
+
+    def search_visible(
+        self,
+        *,
+        personal_info_ids: Optional[List[int]] = None,
+        offset: int = 0,
+        limit: int = 10,
+    ) -> Tuple[List[ResumeSkillTag], int]:
+        """对外接口用：只出「自己启用且归属的个人也启用」的技能标签。
+
+        `personal_info_ids` 传了就再按归属收窄（聚合接口用来一次取一批人的技能）。
+        """
+        conditions: List[Any] = [
+            ResumeSkillTag.is_active.is_(True),
+            ResumeSkillTag.personal_info_id.in_(_active_personal_info_ids()),
+        ]
+        if personal_info_ids is not None:
+            conditions.append(ResumeSkillTag.personal_info_id.in_(personal_info_ids))
+
+        return self.list(
+            conditions=conditions,
+            order_by=[ResumeSkillTag.sort.asc(), ResumeSkillTag.id.asc()],
+            offset=offset,
+            limit=limit,
+        )
+
+
 __all__ = [
     "ResumePersonalInfoRepository",
     "ResumeEducationRepository",
     "ResumeWorkRepository",
     "ResumeProjectRepository",
     "ResumeEvaluationRepository",
+    "ResumeSkillTagRepository",
 ]

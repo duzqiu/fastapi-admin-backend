@@ -12,13 +12,17 @@ from app.models.member import Member, MemberGender
 from app.models.resume import (
     EDUCATION_DEGREE_LABELS,
     RESUME_GENDER_LABELS,
+    SKILL_TAG_SEPARATOR,
     EducationDegree,
     ResumeEducation,
     ResumeEvaluation,
     ResumeGender,
     ResumePersonalInfo,
     ResumeProject,
+    ResumeSkillTag,
     ResumeWork,
+    join_skill_tags,
+    split_skill_tags,
 )
 from app.models.user import User, UserRole
 
@@ -45,6 +49,10 @@ __all__ = [
     "ResumeWork",
     "ResumeProject",
     "ResumeEvaluation",
+    "ResumeSkillTag",
+    "SKILL_TAG_SEPARATOR",
+    "split_skill_tags",
+    "join_skill_tags",
     "ResumeGender",
     "RESUME_GENDER_LABELS",
     "EducationDegree",

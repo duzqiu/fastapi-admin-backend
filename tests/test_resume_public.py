@@ -18,6 +18,7 @@ EDUCATIONS = f"{API}/resume/educations"
 WORKS = f"{API}/resume/work-experiences"
 PROJECTS = f"{API}/resume/projects"
 EVALUATIONS = f"{API}/resume/evaluations"
+SKILLS = f"{API}/resume/skill-tags"
 
 TAG = "对外接口测试"
 
@@ -67,6 +68,8 @@ def create_tree(client, auth_headers, suffix=""):
             "name": f"{TAG}项目{suffix}",
             "role": "后端负责人",
             "start_month": "2020-01",
+            "duty": "负责接口自动化框架搭建",
+            "achievement": "回归耗时从两天降到 40 分钟",
         },
     ).json()
     evaluation = client.post(
@@ -78,12 +81,22 @@ def create_tree(client, auth_headers, suffix=""):
             "content": f"{TAG}评价内容{suffix}",
         },
     ).json()
+    skill_tag = client.post(
+        SKILLS,
+        headers=auth_headers,
+        json={
+            "personal_info_id": person["id"],
+            "category": "测试与自动化",
+            "tags": "pytest;Playwright",
+        },
+    ).json()
     return {
         "person": person,
         "work": work,
         "education": education,
         "project": project,
         "evaluation": evaluation,
+        "skill_tag": skill_tag,
     }
 
 
@@ -138,7 +151,7 @@ def test_public_openapi_is_separate(client):
 
 # ==================== 2. 传 ID：取指定用户的全部信息 ====================
 def test_public_profiles_for_one_person(client, auth_headers):
-    """传 personal_info_id 时，返回这个人完整的四块信息，且项目挂在公司下面。"""
+    """传 personal_info_id 时，返回这个人完整的五块信息，且项目挂在公司下面。"""
     tree = create_tree(client, auth_headers, "单人")
     person_id = tree["person"]["id"]
 
@@ -166,11 +179,19 @@ def test_public_profiles_for_one_person(client, auth_headers):
     assert len(work["projects"]) == 1
     assert work["projects"][0]["name"] == f"{TAG}项目单人"
     assert work["projects"][0]["role"] == "后端负责人"
+    # 项目职责 / 业绩单独透出，前台按块展示
+    assert work["projects"][0]["duty"] == "负责接口自动化框架搭建"
+    assert work["projects"][0]["achievement"] == "回归耗时从两天降到 40 分钟"
     assert "work" not in work["projects"][0]
 
     # 自我评价
     assert len(profile["evaluations"]) == 1
     assert profile["evaluations"][0]["content"] == f"{TAG}评价内容单人"
+
+    # 技能标签：分类 + 已经拆好的标签数组
+    assert len(profile["skill_tags"]) == 1
+    assert profile["skill_tags"][0]["category"] == "测试与自动化"
+    assert profile["skill_tags"][0]["tags"] == ["pytest", "Playwright"]
 
     drop_tree(client, auth_headers, person_id)
 

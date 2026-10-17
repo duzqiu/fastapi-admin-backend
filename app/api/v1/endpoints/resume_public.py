@@ -7,7 +7,7 @@
         ?personal_info_id=1   只取这个人的整份简历
         （不传）              取所有启用个人的整份简历
 
-一次返回：个人信息 + 教育经历 + 工作经历（每条自带其下的项目经历）+ 自我评价。
+一次返回：个人信息 + 教育经历 + 工作经历（每条自带其下的项目经历）+ 自我评价 + 技能标签。
 
 这组接口独立于后台管理端那套（`resume.py`）：
 
@@ -51,7 +51,8 @@ def public_profiles(
     - 不传：返回所有启用中个人的数组（最多 `limit` 个）；
 
     两种情况返回结构完全一致，都是数组，前端可以按同一套逻辑渲染。
-    每个条目的 `work_experiences[].projects[]` 就是这家公司做过的项目。
+    每个条目的 `work_experiences[].projects[]` 就是这家公司做过的项目；
+    `skill_tags[]` 是「标签分类 + 标签数组」，后端已经把分号串拆好，前端直接铺 chip。
     """
     return service.list_public_profiles(personal_info_id=personal_info_id, limit=limit)
 

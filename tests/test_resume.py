@@ -1,12 +1,13 @@
-"""个人简历类目测试：个人信息、教育信息、工作经历、项目经历、自我评价五组接口。
+"""个人简历类目测试：个人信息、教育信息、工作经历、项目经历、自我评价、技能标签六组接口。
 
 本类目独立：断言里不涉及任何其它域的数据，全部用带前缀的测试数据以 keyword 隔离。
 
 层级绑定：
     个人信息 ─┬─ 教育信息
               ├─ 工作经历 ── 项目经历
-              └─ 自我评价
-所以除了个人信息本身，其它四组用例都要先建好父级。
+              ├─ 自我评价
+              └─ 技能标签
+所以除了个人信息本身，其它五组用例都要先建好父级。
 """
 
 API = "/api/v1"
@@ -15,11 +16,12 @@ EDUCATIONS = f"{API}/resume/educations"
 WORKS = f"{API}/resume/work-experiences"
 PROJECTS = f"{API}/resume/projects"
 EVALUATIONS = f"{API}/resume/evaluations"
+SKILLS = f"{API}/resume/skill-tags"
 
 # 测试数据统一带这个前缀，避免与库里已有数据混淆
 TAG = "简历测试"
 
-ALL_COLLECTIONS = (PERSONAL, EDUCATIONS, WORKS, PROJECTS, EVALUATIONS)
+ALL_COLLECTIONS = (PERSONAL, EDUCATIONS, WORKS, PROJECTS, EVALUATIONS, SKILLS)
 
 # 1x1 透明 PNG，用来测头像上传
 _PNG = bytes.fromhex(
@@ -479,6 +481,8 @@ def test_project_crud(client, auth_headers):
         "start_month": "2020-03",
         "end_month": "2021-12",
         "description": "拆分单体订单服务，支撑日均 200 万单",
+        "duty": "负责订单服务的拆分与灰度上线",
+        "achievement": "下单接口 P99 从 800ms 降到 220ms",
         "sort": 1,
     }
     created = client.post(PROJECTS, headers=auth_headers, json=payload)
@@ -490,11 +494,18 @@ def test_project_crud(client, auth_headers):
     assert data["position"] == "技术专家"
     assert data["personal_info_id"] == person_id
     assert data["owner_name"] == f"{TAG}-项目张三"
+    # 职责 / 业绩独立存放，不再塞进描述里
+    assert data["duty"] == "负责订单服务的拆分与灰度上线"
+    assert data["achievement"] == "下单接口 P99 从 800ms 降到 220ms"
 
-    # 列表 + 关键字
+    # 列表 + 关键字（职责、业绩也参与匹配）
     listed = client.get(PROJECTS, headers=auth_headers, params={"keyword": "订单中台"})
     assert listed.json()["total"] == 1
     assert listed.json()["items"][0]["company"] == f"{TAG}项目公司"
+    assert (
+        client.get(PROJECTS, headers=auth_headers, params={"keyword": "P99"}).json()["total"]
+        == 1
+    )
 
     # 按公司经历过滤
     assert (
@@ -719,6 +730,15 @@ def test_delete_personal_removes_all_children(client, auth_headers):
         headers=auth_headers,
         json={"personal_info_id": person_id, "content": f"{TAG}级联评价"},
     ).json()
+    skill_tag = client.post(
+        SKILLS,
+        headers=auth_headers,
+        json={
+            "personal_info_id": person_id,
+            "category": f"{TAG}级联分类",
+            "tags": "pytest;Allure",
+        },
+    ).json()
 
     assert client.delete(f"{PERSONAL}/{person_id}", headers=auth_headers).status_code == 200
 
@@ -727,8 +747,104 @@ def test_delete_personal_removes_all_children(client, auth_headers):
         (WORKS, work["id"]),
         (PROJECTS, project["id"]),
         (EVALUATIONS, evaluation["id"]),
+        (SKILLS, skill_tag["id"]),
     ):
         assert client.get(f"{url}/{item_id}", headers=auth_headers).status_code == 404, url
+
+
+# ==================== 技能标签 ====================
+def test_skill_tag_crud(client, auth_headers):
+    """技能标签：分类 + 一个输入框里分号分隔的多个标签，落库会规整成标准格式。"""
+    person_id = create_personal(client, auth_headers, f"{TAG}-技能")["id"]
+
+    created = client.post(
+        SKILLS,
+        headers=auth_headers,
+        json={
+            "personal_info_id": person_id,
+            "category": " 测试与自动化 ",
+            "tags": "Python； pytest ; Playwright;Python",
+            "sort": 1,
+        },
+    )
+    assert created.status_code == 201, created.text
+    item = created.json()
+    assert item["category"] == "测试与自动化"  # 分类去首尾空格
+    assert item["tags"] == "Python;pytest;Playwright"  # 中英文分号都认，重复项去掉
+    assert item["tag_list"] == ["Python", "pytest", "Playwright"]
+    assert item["name"] == f"{TAG}-技能"  # 姓名随所属个人同步
+    assert item["is_active"] is True
+
+    listed = client.get(
+        SKILLS, headers=auth_headers, params={"personal_info_id": person_id}
+    )
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["total"] == 1
+    assert listed.json()["items"][0]["id"] == item["id"]
+
+    # 按分类筛选能命中，换个分类名就查不到
+    hit = client.get(SKILLS, headers=auth_headers, params={"category": "测试与自动化"})
+    assert hit.json()["total"] == 1
+    miss = client.get(SKILLS, headers=auth_headers, params={"category": "不存在的分类"})
+    assert miss.json()["total"] == 0
+
+    updated = client.put(
+        f"{SKILLS}/{item['id']}", headers=auth_headers, json={"tags": "JMeter; SQL"}
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["tag_list"] == ["JMeter", "SQL"]
+
+    disabled = client.patch(
+        f"{SKILLS}/{item['id']}/status", headers=auth_headers, json={"is_active": False}
+    )
+    assert disabled.status_code == 200
+    assert disabled.json()["is_active"] is False
+
+    assert client.delete(f"{SKILLS}/{item['id']}", headers=auth_headers).status_code == 200
+    assert client.get(f"{SKILLS}/{item['id']}", headers=auth_headers).status_code == 404
+
+    client.delete(f"{PERSONAL}/{person_id}", headers=auth_headers)
+
+
+def test_skill_tag_requires_existing_personal(client, auth_headers):
+    """绑定不存在的个人信息 -> 404。"""
+    response = client.post(
+        SKILLS,
+        headers=auth_headers,
+        json={"personal_info_id": 999999, "category": "测试", "tags": "pytest"},
+    )
+    assert response.status_code == 404
+    assert "个人信息不存在" in response.text
+
+
+def test_skill_tag_rejects_empty_tags(client, auth_headers):
+    """只填空格 / 分号视为没填，直接 422。"""
+    person_id = create_personal(client, auth_headers, f"{TAG}-空标签")["id"]
+    response = client.post(
+        SKILLS,
+        headers=auth_headers,
+        json={"personal_info_id": person_id, "category": "测试", "tags": " ; ； "},
+    )
+    assert response.status_code == 422
+    client.delete(f"{PERSONAL}/{person_id}", headers=auth_headers)
+
+
+def test_skill_tag_rename_syncs_name(client, auth_headers):
+    """改个人姓名后，技能标签里冗余的姓名跟着变。"""
+    person_id = create_personal(client, auth_headers, f"{TAG}-技能旧名")["id"]
+    item = client.post(
+        SKILLS,
+        headers=auth_headers,
+        json={"personal_info_id": person_id, "category": "语言", "tags": "Python"},
+    ).json()
+
+    client.put(
+        f"{PERSONAL}/{person_id}", headers=auth_headers, json={"name": f"{TAG}-技能新名"}
+    )
+    detail = client.get(f"{SKILLS}/{item['id']}", headers=auth_headers).json()
+    assert detail["name"] == f"{TAG}-技能新名"
+
+    client.delete(f"{PERSONAL}/{person_id}", headers=auth_headers)
 
 
 # ==================== 是否启用 ====================
@@ -831,7 +947,7 @@ def test_status_requires_token_and_existing(client, auth_headers):
     assert missing.status_code == 404
     assert "个人信息不存在" in missing.text
 
-    for url in (EDUCATIONS, WORKS, PROJECTS, EVALUATIONS):
+    for url in (EDUCATIONS, WORKS, PROJECTS, EVALUATIONS, SKILLS):
         assert client.patch(f"{url}/999999/status", json={"is_active": True}).status_code == 401
         assert (
             client.patch(
@@ -847,7 +963,7 @@ def test_status_requires_token_and_existing(client, auth_headers):
 
 # ==================== OpenAPI 类目 ====================
 def test_openapi_category(client):
-    """五组接口自成类目：路径都收在 /resume 前缀下，且各有自己的 tag。"""
+    """六组接口自成类目：路径都收在 /resume 前缀下，且各有自己的 tag。"""
     schema = client.get("/api/v1/openapi.json").json()
     # `/resume/public/*` 是对外接口（另见 tests/test_resume_public.py），不算管理端类目
     resume_paths = [
@@ -855,7 +971,7 @@ def test_openapi_category(client):
         for path in schema["paths"]
         if path.startswith("/api/v1/resume/") and not path.startswith("/api/v1/resume/public")
     ]
-    # 五个类目 × (集合路径 + 详情路径 + 启停路径)
+    # 六个类目 × (集合路径 + 详情路径 + 启停路径)
     # —— openapi 会把同一路径的不同方法合并成一条
     assert sorted(resume_paths) == [
         "/api/v1/resume/educations",
@@ -871,6 +987,9 @@ def test_openapi_category(client):
         "/api/v1/resume/projects",
         "/api/v1/resume/projects/{project_id}",
         "/api/v1/resume/projects/{project_id}/status",
+        "/api/v1/resume/skill-tags",
+        "/api/v1/resume/skill-tags/{skill_tag_id}",
+        "/api/v1/resume/skill-tags/{skill_tag_id}/status",
         "/api/v1/resume/work-experiences",
         "/api/v1/resume/work-experiences/{work_id}",
         "/api/v1/resume/work-experiences/{work_id}/status",
@@ -888,9 +1007,10 @@ def test_openapi_category(client):
         "后台-个人简历-工作经历",
         "后台-个人简历-项目经历",
         "后台-个人简历-自我评价",
+        "后台-个人简历-技能标签",
     }
 
-    # 五组的形状一致：集合路径上只有列表与新增，详情路径上只有查询 / 更新 / 删除，
+    # 六组的形状一致：集合路径上只有列表与新增，详情路径上只有查询 / 更新 / 删除，
     # 启停路径上只有 PATCH
     status_paths = {
         "personal-infos": "info_id",
@@ -898,8 +1018,16 @@ def test_openapi_category(client):
         "work-experiences": "work_id",
         "projects": "project_id",
         "evaluations": "evaluation_id",
+        "skill-tags": "skill_tag_id",
     }
-    for path in ("personal-infos", "educations", "work-experiences", "projects", "evaluations"):
+    for path in (
+        "personal-infos",
+        "educations",
+        "work-experiences",
+        "projects",
+        "evaluations",
+        "skill-tags",
+    ):
         assert set(schema["paths"][f"/api/v1/resume/{path}"]) == {"get", "post"}, path
         assert set(schema["paths"][f"/api/v1/resume/{path}/{{{status_paths[path]}}}"]) == {
             "get",

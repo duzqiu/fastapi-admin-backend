@@ -1,11 +1,12 @@
-"""个人简历服务：个人信息、教育信息、工作经历、项目经历、自我评价的增删改查。
+"""个人简历服务：个人信息、教育信息、工作经历、项目经历、自我评价、技能标签的增删改查。
 
 事务边界：仓储只 flush，commit 统一在本层执行。
 
 层级绑定（本层负责校验，仓储不掺业务判断）：
     个人信息 ─┬─ 教育信息
               ├─ 工作经历 ── 项目经历
-              └─ 自我评价
+              ├─ 自我评价
+              └─ 技能标签
 
 - 写入教育 / 工作 / 自我评价时，`personal_info_id` 必须指向已存在的个人信息，
   并把该个人信息的姓名同步写入 `name`（冗余，便于列表展示与搜索）；
@@ -29,6 +30,7 @@ from app.models.resume import (
     ResumeEvaluation,
     ResumePersonalInfo,
     ResumeProject,
+    ResumeSkillTag,
     ResumeWork,
 )
 from app.repositories.resume_repository import (
@@ -36,6 +38,7 @@ from app.repositories.resume_repository import (
     ResumeEvaluationRepository,
     ResumePersonalInfoRepository,
     ResumeProjectRepository,
+    ResumeSkillTagRepository,
     ResumeWorkRepository,
 )
 from app.schemas.resume import (
@@ -51,6 +54,9 @@ from app.schemas.resume import (
     ResumeProjectCreate,
     ResumeProjectOut,
     ResumeProjectUpdate,
+    ResumeSkillTagCreate,
+    ResumeSkillTagOut,
+    ResumeSkillTagUpdate,
     ResumeWorkCreate,
     ResumeWorkOut,
     ResumeWorkUpdate,
@@ -61,6 +67,7 @@ from app.schemas.resume_public import (
     ResumePersonalInfoPublicOut,
     ResumeProfileOut,
     ResumeProjectItem,
+    ResumeSkillTagItem,
     ResumeWorkItem,
 )
 
@@ -84,6 +91,13 @@ def _build_work_item(work: ResumeWork, projects: List[Any]) -> ResumeWorkItem:
     return item
 
 
+def _build_skill_tag_item(skill_tag: ResumeSkillTag) -> ResumeSkillTagItem:
+    """技能标签出参：库里存的是分号串，对外给数组，前端直接铺 chip。"""
+    return ResumeSkillTagItem(
+        id=skill_tag.id, category=skill_tag.category, tags=skill_tag.tag_list
+    )
+
+
 class ResumeService:
     """个人简历业务逻辑层（五个子类目共用一个服务）。"""
 
@@ -94,6 +108,7 @@ class ResumeService:
         self.works = ResumeWorkRepository(db)
         self.projects = ResumeProjectRepository(db)
         self.evaluations = ResumeEvaluationRepository(db)
+        self.skill_tags = ResumeSkillTagRepository(db)
 
     # ======================== 关联对象解析（绑定校验） ========================
     def get_personal_info_or_404(self, info_id: int) -> ResumePersonalInfo:
@@ -151,6 +166,8 @@ class ResumeService:
         data = payload.model_dump(exclude_unset=True)
         if data.get("gender") is not None:
             data["gender"] = data["gender"].value
+        if data.get("current_status") is not None:
+            data["current_status"] = data["current_status"].value
         if data.get("name"):
             data["name"] = data["name"].strip()
         # 换了头像就把上一张删掉（`remove_upload` 只认本服务上传的地址，外链会原样忽略）；
@@ -170,6 +187,7 @@ class ResumeService:
             self.educations.update_name_by_personal_info(info_id, data["name"])
             self.works.update_name_by_personal_info(info_id, data["name"])
             self.evaluations.update_name_by_personal_info(info_id, data["name"])
+            self.skill_tags.update_name_by_personal_info(info_id, data["name"])
 
         self.db.commit()
         self.db.refresh(item)
@@ -183,6 +201,7 @@ class ResumeService:
         self.educations.delete_by_personal_info(info_id)
         self.works.delete_by_personal_info(info_id)
         self.evaluations.delete_by_personal_info(info_id)
+        self.skill_tags.delete_by_personal_info(info_id)
         # 头像文件一起清掉（外链会被忽略）
         remove_upload(item.avatar)
         self.personal_infos.delete(item)
@@ -201,6 +220,7 @@ class ResumeService:
         """入参转落库字段：枚举取值、姓名与头像地址去空格。"""
         data = payload.model_dump()
         data["gender"] = payload.gender.value
+        data["current_status"] = payload.current_status.value
         data["name"] = payload.name.strip()
         data["avatar"] = (payload.avatar or "").strip()
         return data
@@ -465,6 +485,68 @@ class ResumeService:
         self.db.commit()
 
 
+    # ======================== 技能标签 ========================
+    def get_skill_tag_or_404(self, skill_tag_id: int) -> ResumeSkillTag:
+        item = self.skill_tags.get(skill_tag_id)
+        if item is None:
+            raise NotFoundError(f"技能标签不存在: id={skill_tag_id}")
+        return item
+
+    def list_skill_tags(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 10,
+        keyword: Optional[str] = None,
+        category: Optional[str] = None,
+        personal_info_id: Optional[int] = None,
+        is_active: Optional[bool] = None,
+    ) -> Tuple[List[ResumeSkillTagOut], int]:
+        """分页查询技能标签（可按分类 / 归属个人 / 启用状态收窄）。"""
+        items, total = self.skill_tags.search(
+            keyword=keyword,
+            category=category,
+            personal_info_id=personal_info_id,
+            is_active=is_active,
+            offset=(page - 1) * page_size,
+            limit=page_size,
+        )
+        return [ResumeSkillTagOut.model_validate(item) for item in items], total
+
+    def get_skill_tag(self, skill_tag_id: int) -> ResumeSkillTagOut:
+        """技能标签详情。"""
+        return ResumeSkillTagOut.model_validate(self.get_skill_tag_or_404(skill_tag_id))
+
+    def create_skill_tag(self, payload: ResumeSkillTagCreate) -> ResumeSkillTagOut:
+        """新增技能标签（必须绑定已存在的个人信息）。"""
+        personal = self.get_personal_info_or_404(payload.personal_info_id)
+        data = payload.model_dump()
+        data["name"] = personal.name
+
+        item = self.skill_tags.create(**data)
+        self.db.commit()
+        self.db.refresh(item)
+        return ResumeSkillTagOut.model_validate(item)
+
+    def update_skill_tag(
+        self, skill_tag_id: int, payload: ResumeSkillTagUpdate
+    ) -> ResumeSkillTagOut:
+        """更新技能标签；改绑个人信息时同步姓名。"""
+        item = self.get_skill_tag_or_404(skill_tag_id)
+        data = payload.model_dump(exclude_unset=True)
+        if data.get("personal_info_id") is not None:
+            data["name"] = self.get_personal_info_or_404(data["personal_info_id"]).name
+
+        self.skill_tags.update(item, **data)
+        self.db.commit()
+        self.db.refresh(item)
+        return ResumeSkillTagOut.model_validate(item)
+
+    def delete_skill_tag(self, skill_tag_id: int) -> None:
+        """删除技能标签。"""
+        self.skill_tags.delete(self.get_skill_tag_or_404(skill_tag_id))
+        self.db.commit()
+
     # ======================== 启用 / 禁用 ========================
     # 「是否启用」只是一条业务标记：不联动父子级（父级停用不代表子级停用），
     # 也不参与任何权限判断，只供列表过滤与前台取数时使用。
@@ -514,6 +596,16 @@ class ResumeService:
         self.db.refresh(item)
         return ResumeEvaluationOut.model_validate(item)
 
+    def set_skill_tag_status(
+        self, skill_tag_id: int, is_active: bool
+    ) -> ResumeSkillTagOut:
+        """启用 / 禁用技能标签。"""
+        item = self.get_skill_tag_or_404(skill_tag_id)
+        self.skill_tags.update(item, is_active=is_active)
+        self.db.commit()
+        self.db.refresh(item)
+        return ResumeSkillTagOut.model_validate(item)
+
 
     # ======================== 对外接口（无需登录，只出启用数据） ========================
     # 对外只保留**一个**聚合接口：一次把「整份简历」取全，省掉前端来回请求。
@@ -548,11 +640,15 @@ class ResumeService:
         evaluations, _ = self.evaluations.search_visible(
             personal_info_ids=person_ids, offset=0, limit=PUBLIC_CHILD_LIMIT
         )
+        skill_tags, _ = self.skill_tags.search_visible(
+            personal_info_ids=person_ids, offset=0, limit=PUBLIC_CHILD_LIMIT
+        )
 
         educations_by_person = _group_by(educations, "personal_info_id")
         works_by_person = _group_by(works, "personal_info_id")
         projects_by_work = _group_by(projects, "work_id")
         evaluations_by_person = _group_by(evaluations, "personal_info_id")
+        skill_tags_by_person = _group_by(skill_tags, "personal_info_id")
 
         return [
             ResumeProfileOut(
@@ -568,6 +664,10 @@ class ResumeService:
                 evaluations=[
                     ResumeEvaluationItem.model_validate(item)
                     for item in evaluations_by_person.get(person.id, [])
+                ],
+                skill_tags=[
+                    _build_skill_tag_item(item)
+                    for item in skill_tags_by_person.get(person.id, [])
                 ],
             )
             for person in persons

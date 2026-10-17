@@ -1,20 +1,21 @@
 """个人简历类目接口（仅管理员可访问）。
 
-这是一个**独立类目**：五组接口各自一个 router / 一个 tag，只依赖自己的服务，
+这是一个**独立类目**：六组接口各自一个 router / 一个 tag，只依赖自己的服务，
 不引用任何其它域的模型、仓储或接口；路径也统一收在 `/resume` 前缀下。
 
-OpenAPI（/docs）里会自成一个类目，下分五组：
+OpenAPI（/docs）里会自成一个类目，下分六组：
     后台-个人简历-个人信息   /resume/personal-infos
     后台-个人简历-教育信息   /resume/educations
     后台-个人简历-工作经历   /resume/work-experiences
     后台-个人简历-项目经历   /resume/projects
     后台-个人简历-自我评价   /resume/evaluations
+    后台-个人简历-技能标签   /resume/skill-tags
 
 层级绑定（写入时必填）：
-- 教育 / 工作 / 自我评价 绑定 `personal_info_id`（个人信息，即「简历主体」）；
+- 教育 / 工作 / 自我评价 / 技能标签 绑定 `personal_info_id`（个人信息，即「简历主体」）；
 - 项目经历绑定 `work_id`（工作经历，即「公司」），公司名与归属个人由它带出。
 
-五组接口的形状完全一致：分页列表（带关键字搜索）、详情、新增、更新、删除。
+六组接口的形状完全一致：分页列表（带关键字搜索）、详情、新增、更新、删除。
 """
 
 from typing import Optional
@@ -41,6 +42,10 @@ from app.schemas.resume import (
     ResumeProjectOut,
     ResumeProjectStatusUpdate,
     ResumeProjectUpdate,
+    ResumeSkillTagCreate,
+    ResumeSkillTagOut,
+    ResumeSkillTagStatusUpdate,
+    ResumeSkillTagUpdate,
     ResumeWorkCreate,
     ResumeWorkOut,
     ResumeWorkStatusUpdate,
@@ -77,6 +82,11 @@ project_router = APIRouter(
 evaluation_router = APIRouter(
     prefix=f"{RESUME_PREFIX}/evaluations",
     tags=["后台-个人简历-自我评价"],
+    dependencies=admin_dependency,
+)
+skill_tag_router = APIRouter(
+    prefix=f"{RESUME_PREFIX}/skill-tags",
+    tags=["后台-个人简历-技能标签"],
     dependencies=admin_dependency,
 )
 
@@ -481,3 +491,88 @@ def update_evaluation_status(
     service: ResumeService = Depends(get_resume_service),
 ) -> ResumeEvaluationOut:
     return service.set_evaluation_status(evaluation_id, payload.is_active)
+
+
+# ======================== 技能标签 ========================
+@skill_tag_router.get(
+    "", response_model=PageResult[ResumeSkillTagOut], summary="技能标签列表（分页 + 搜索）"
+)
+def list_skill_tags(
+    page_params: PageParams = Depends(),
+    keyword: Optional[str] = Query(None, description="姓名 / 分类 / 标签内容模糊搜索"),
+    category: Optional[str] = Query(None, description="按标签分类精确筛选"),
+    personal_info_id: Optional[int] = Query(None, gt=0, description="只看某个人的技能标签"),
+    is_active: Optional[bool] = Query(None, description="按是否启用筛选"),
+    service: ResumeService = Depends(get_resume_service),
+) -> PageResult[ResumeSkillTagOut]:
+    items, total = service.list_skill_tags(
+        page=page_params.page,
+        page_size=page_params.page_size,
+        keyword=keyword,
+        category=category,
+        personal_info_id=personal_info_id,
+        is_active=is_active,
+    )
+    return PageResult.create(items, total, page_params.page, page_params.page_size)
+
+
+@skill_tag_router.post(
+    "",
+    response_model=ResumeSkillTagOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="新增技能标签（标签列表用分号分隔）",
+)
+def create_skill_tag(
+    payload: ResumeSkillTagCreate,
+    service: ResumeService = Depends(get_resume_service),
+) -> ResumeSkillTagOut:
+    """`tags` 传一个字符串即可，多个标签用分号分隔（中英文分号、逗号都认）。
+
+    服务端会去空格、去重，并统一存成 `Python;pytest;Playwright` 这种格式。
+    """
+    return service.create_skill_tag(payload)
+
+
+@skill_tag_router.get(
+    "/{skill_tag_id}", response_model=ResumeSkillTagOut, summary="技能标签详情"
+)
+def get_skill_tag(
+    skill_tag_id: int,
+    service: ResumeService = Depends(get_resume_service),
+) -> ResumeSkillTagOut:
+    return service.get_skill_tag(skill_tag_id)
+
+
+@skill_tag_router.put(
+    "/{skill_tag_id}", response_model=ResumeSkillTagOut, summary="更新技能标签"
+)
+def update_skill_tag(
+    skill_tag_id: int,
+    payload: ResumeSkillTagUpdate,
+    service: ResumeService = Depends(get_resume_service),
+) -> ResumeSkillTagOut:
+    return service.update_skill_tag(skill_tag_id, payload)
+
+
+@skill_tag_router.delete(
+    "/{skill_tag_id}", response_model=MessageResponse, summary="删除技能标签"
+)
+def delete_skill_tag(
+    skill_tag_id: int,
+    service: ResumeService = Depends(get_resume_service),
+) -> MessageResponse:
+    service.delete_skill_tag(skill_tag_id)
+    return MessageResponse(message="删除成功")
+
+
+@skill_tag_router.patch(
+    "/{skill_tag_id}/status",
+    response_model=ResumeSkillTagOut,
+    summary="启用 / 禁用技能标签",
+)
+def update_skill_tag_status(
+    skill_tag_id: int,
+    payload: ResumeSkillTagStatusUpdate,
+    service: ResumeService = Depends(get_resume_service),
+) -> ResumeSkillTagOut:
+    return service.set_skill_tag_status(skill_tag_id, payload.is_active)

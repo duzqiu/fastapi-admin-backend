@@ -1,10 +1,10 @@
 """个人简历相关 Pydantic 模型（接口出入参定义）。
 
-五块数据（个人信息 / 教育信息 / 工作经历 / 项目经历 / 自我评价），
+六块数据（个人信息 / 教育信息 / 工作经历 / 项目经历 / 自我评价 / 技能标签），
 每个都是 `XxxCreate` / `XxxUpdate` / `XxxOut` 三件套。
 
 层级绑定（写入时必填，读出来一并回显）：
-- 教育信息 / 工作经历 / 自我评价 通过 `personal_info_id` 绑定「个人信息」；
+- 教育信息 / 工作经历 / 自我评价 / 技能标签 通过 `personal_info_id` 绑定「个人信息」；
 - 项目经历通过 `work_id` 绑定「工作经历」（公司经历），
   并顺带回显 `personal_info_id` / `owner_name` / `company` / `position`。
 
@@ -14,11 +14,16 @@
 
 import re
 from datetime import date, datetime
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.models.resume import EducationDegree, ResumeGender
+from app.models.resume import (
+    EducationDegree,
+    ResumeCurrentStatus,
+    ResumeGender,
+    join_skill_tags,
+)
 from app.schemas.common import ORMBaseModel
 
 #: 「YYYY-MM」月份字段的正则：简历里的入学 / 毕业 / 入职 / 离职时间通常只精确到月
@@ -48,6 +53,10 @@ class ResumePersonalInfoCreate(BaseModel):
     email: str = Field(default="", max_length=120, description="邮箱")
     city: str = Field(default="", max_length=100, description="现居城市")
     job_intention: str = Field(default="", max_length=100, description="求职意向")
+    current_status: ResumeCurrentStatus = Field(
+        default=ResumeCurrentStatus.EMPLOYED_OPEN,
+        description="目前状态：resigned / left / employed_open / employed_closed",
+    )
     website: str = Field(default="", max_length=200, description="个人主页 / 作品集")
     remark: str = Field(default="", description="备注")
     is_active: bool = Field(default=True, description="是否启用")
@@ -67,6 +76,9 @@ class ResumePersonalInfoUpdate(BaseModel):
     email: Optional[str] = Field(default=None, max_length=120)
     city: Optional[str] = Field(default=None, max_length=100)
     job_intention: Optional[str] = Field(default=None, max_length=100)
+    current_status: Optional[ResumeCurrentStatus] = Field(
+        default=None, description="目前状态；不传保持原值"
+    )
     website: Optional[str] = Field(default=None, max_length=200)
     remark: Optional[str] = Field(default=None)
     is_active: Optional[bool] = Field(default=None, description="是否启用")
@@ -92,6 +104,8 @@ class ResumePersonalInfoOut(ORMBaseModel):
     email: str = ""
     city: str = ""
     job_intention: str = ""
+    current_status: str = ""
+    current_status_text: str = Field(default="", description="目前状态中文文案")
     website: str = ""
     remark: str = ""
     is_active: bool = Field(default=True, description="是否启用")
@@ -245,7 +259,9 @@ class ResumeProjectCreate(BaseModel):
     role: str = Field(default="", max_length=100, description="担任角色")
     start_month: str = Field(default="", description="开始时间，YYYY-MM")
     end_month: str = Field(default="", description="结束时间，YYYY-MM，空为至今")
-    description: str = Field(default="", description="项目描述 / 职责 / 业绩")
+    description: str = Field(default="", description="项目描述 / 背景")
+    duty: str = Field(default="", description="项目职责")
+    achievement: str = Field(default="", description="项目业绩")
     is_active: bool = Field(default=True, description="是否启用")
     sort: int = Field(default=0, ge=0, description="排序值，越小越靠前")
 
@@ -266,6 +282,8 @@ class ResumeProjectUpdate(BaseModel):
     start_month: Optional[str] = Field(default=None, description="开始时间，YYYY-MM")
     end_month: Optional[str] = Field(default=None, description="结束时间，YYYY-MM")
     description: Optional[str] = Field(default=None)
+    duty: Optional[str] = Field(default=None, description="项目职责")
+    achievement: Optional[str] = Field(default=None, description="项目业绩")
     is_active: Optional[bool] = Field(default=None, description="是否启用")
     sort: Optional[int] = Field(default=None, ge=0)
 
@@ -297,6 +315,8 @@ class ResumeProjectOut(ORMBaseModel):
     start_month: str = ""
     end_month: str = ""
     description: str = ""
+    duty: str = ""
+    achievement: str = ""
     is_active: bool = Field(default=True, description="是否启用")
     sort: int = 0
     created_at: datetime
@@ -346,6 +366,91 @@ class ResumeEvaluationOut(ORMBaseModel):
     updated_at: datetime
 
 
+# ------------------------- 技能标签 -------------------------
+class ResumeSkillTagCreate(BaseModel):
+    """创建技能标签入参：一个分类 + 分号分隔的多个标签。"""
+
+    personal_info_id: int = Field(..., gt=0, description="所属个人信息 ID（必须已存在）")
+    category: str = Field(
+        ..., min_length=1, max_length=50, description="标签分类，如：测试与自动化"
+    )
+    tags: str = Field(
+        ..., description="标签列表，多个用分号分隔，如：Python;pytest;Playwright"
+    )
+    is_active: bool = Field(default=True, description="是否启用")
+    sort: int = Field(default=0, ge=0, description="排序值，越小越靠前")
+
+    @field_validator("category")
+    @classmethod
+    def check_category(cls, value: str) -> str:
+        text = (value or "").strip()
+        if not text:
+            raise ValueError("标签分类不能为空")
+        return text
+
+    @field_validator("tags")
+    @classmethod
+    def check_tags(cls, value: str) -> str:
+        # 统一成半角分号分隔，顺手把空标签、重复项丢掉
+        text = join_skill_tags(value)
+        if not text:
+            raise ValueError("至少填一个标签，多个用分号分隔")
+        return text
+
+
+class ResumeSkillTagUpdate(BaseModel):
+    """更新技能标签入参（全部可选，未传字段不修改）。"""
+
+    personal_info_id: Optional[int] = Field(
+        default=None, gt=0, description="改绑到另一个个人信息"
+    )
+    category: Optional[str] = Field(default=None, max_length=50)
+    tags: Optional[str] = Field(default=None, description="标签列表，多个用分号分隔")
+    is_active: Optional[bool] = Field(default=None, description="是否启用")
+    sort: Optional[int] = Field(default=None, ge=0)
+
+    @field_validator("category")
+    @classmethod
+    def check_category(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            raise ValueError("标签分类不能为空")
+        return text
+
+    @field_validator("tags")
+    @classmethod
+    def check_tags(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        text = join_skill_tags(value)
+        if not text:
+            raise ValueError("至少填一个标签，多个用分号分隔")
+        return text
+
+
+class ResumeSkillTagStatusUpdate(BaseModel):
+    """启用 / 禁用技能标签。"""
+
+    is_active: bool = Field(..., description="是否启用")
+
+
+class ResumeSkillTagOut(ORMBaseModel):
+    """技能标签出参。"""
+
+    id: int
+    personal_info_id: Optional[int] = Field(default=None, description="所属个人信息 ID")
+    name: str
+    category: str = ""
+    tags: str = Field(default="", description="标签原文（分号分隔，编辑回填用）")
+    tag_list: List[str] = Field(default_factory=list, description="标签数组（列表展示用）")
+    is_active: bool = Field(default=True, description="是否启用")
+    sort: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
 __all__ = [
     "MONTH_PATTERN",
     "MONTH_HINT",
@@ -369,4 +474,8 @@ __all__ = [
     "ResumeEvaluationUpdate",
     "ResumeEvaluationStatusUpdate",
     "ResumeEvaluationOut",
+    "ResumeSkillTagCreate",
+    "ResumeSkillTagUpdate",
+    "ResumeSkillTagStatusUpdate",
+    "ResumeSkillTagOut",
 ]

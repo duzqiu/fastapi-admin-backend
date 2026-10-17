@@ -14,7 +14,8 @@
       ├─ educations[]                教育经历
       ├─ work_experiences[]          工作经历（公司）
       │    └─ projects[]             在这家公司做过的项目
-      └─ evaluations[]               自我评价
+      ├─ evaluations[]               自我评价
+      └─ skill_tags[]                技能标签（分类 + 标签数组）
 
 两点约定：
 1. 只输出**启用状态**的数据（记录自己启用，且各级父级也启用）；
@@ -43,6 +44,8 @@ class ResumePersonalInfoPublicOut(ORMBaseModel):
     email: str = ""
     city: str = ""
     job_intention: str = ""
+    current_status: str = Field(default="", description="目前状态代码")
+    current_status_text: str = Field(default="", description="目前状态中文文案")
     website: str = ""
     remark: str = ""
 
@@ -77,6 +80,8 @@ class ResumeProjectItem(ORMBaseModel):
     start_month: str = ""
     end_month: str = ""
     description: str = ""
+    duty: str = ""
+    achievement: str = ""
 
 
 class ResumeWorkItem(ORMBaseModel):
@@ -94,8 +99,16 @@ class ResumeWorkItem(ORMBaseModel):
     )
 
 
+class ResumeSkillTagItem(ORMBaseModel):
+    """技能标签条目：一个分类 + 该分类下的多个标签（后端已拆好，前端直接铺 chip）。"""
+
+    id: int
+    category: str = ""
+    tags: List[str] = Field(default_factory=list, description="该分类下的标签列表")
+
+
 class ResumeProfileOut(ORMBaseModel):
-    """一份完整的简历：个人信息 + 教育 + 工作（含项目）+ 自我评价。"""
+    """一份完整的简历：个人信息 + 教育 + 工作（含项目）+ 自我评价 + 技能标签。"""
 
     personal_info: ResumePersonalInfoPublicOut
     educations: List[ResumeEducationItem] = Field(default_factory=list, description="教育经历")
@@ -103,6 +116,9 @@ class ResumeProfileOut(ORMBaseModel):
         default_factory=list, description="工作经历（每条自带其下的项目经历）"
     )
     evaluations: List[ResumeEvaluationItem] = Field(default_factory=list, description="自我评价")
+    skill_tags: List[ResumeSkillTagItem] = Field(
+        default_factory=list, description="技能标签（按分类分组，按 sort 升序）"
+    )
 
 
 __all__ = [
@@ -111,5 +127,6 @@ __all__ = [
     "ResumeEvaluationItem",
     "ResumeProjectItem",
     "ResumeWorkItem",
+    "ResumeSkillTagItem",
     "ResumeProfileOut",
 ]

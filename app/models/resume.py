@@ -11,11 +11,13 @@
     resume_base_work           ->  个人简历_基础_工作经历
     resume_base_project        ->  个人简历_基础_项目经历
     resume_base_evaluation     ->  个人简历_基础_自我评价
+    resume_base_skill_tag      ->  个人简历_基础_技能标签
 
 **本域内是一棵树**（个人信息是根）：
     个人信息 ─┬─ 教育信息
               ├─ 工作经历 ── 项目经历（项目挂在某段公司经历下）
-              └─ 自我评价
+              ├─ 自我评价
+              └─ 技能标签（分类 + 该分类下的多个标签）
 
 - 教育信息 / 工作经历 / 自我评价 都通过 `personal_info_id` 绑定到个人信息；
 - 项目经历通过 `work_id` 绑定到工作经历（因此间接归属到某个个人信息）；
@@ -32,7 +34,7 @@
 
 import enum
 from datetime import date
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy import Boolean, Date, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -57,6 +59,24 @@ RESUME_GENDER_LABELS: Dict[str, str] = {
 }
 
 
+class ResumeCurrentStatus(str, enum.Enum):
+    """个人信息里的「目前状态」。"""
+
+    RESIGNED = "resigned"  # 已离职-随时到岗
+    LEFT = "left"  # 已离职-月内到岗
+    EMPLOYED_OPEN = "employed_open"  # 在职-考虑机会
+    EMPLOYED_CLOSED = "employed_closed"  # 在职-暂不考虑
+
+
+#: 目前状态 -> 中文文案（接口出参的 current_status_text 与前端下拉共用）
+RESUME_CURRENT_STATUS_LABELS: Dict[str, str] = {
+    ResumeCurrentStatus.RESIGNED.value: "已离职-随时到岗",
+    ResumeCurrentStatus.LEFT.value: "已离职-月内到岗",
+    ResumeCurrentStatus.EMPLOYED_OPEN.value: "在职-考虑机会",
+    ResumeCurrentStatus.EMPLOYED_CLOSED.value: "在职-暂不考虑",
+}
+
+
 class EducationDegree(str, enum.Enum):
     """教育信息里的学历。"""
 
@@ -75,6 +95,35 @@ EDUCATION_DEGREE_LABELS: Dict[str, str] = {
     EducationDegree.MASTER.value: "硕士",
     EducationDegree.DOCTOR.value: "博士",
 }
+
+
+#: 技能标签入库时的分隔符：后台一个输入框里写多个标签，落库统一成半角分号
+SKILL_TAG_SEPARATOR = ";"
+
+#: 允许的输入分隔符：中英文分号 / 逗号 / 顿号都认，免得用户切输入法时白填
+SKILL_TAG_DELIMITERS = (SKILL_TAG_SEPARATOR, "；", ",", "，", "、")
+
+
+def split_skill_tags(raw: Optional[str]) -> List[str]:
+    """把「Python;pytest；Playwright」拆成去空格、去重后的标签列表。"""
+    text = (raw or "").strip()
+    if not text:
+        return []
+
+    for delimiter in SKILL_TAG_DELIMITERS:
+        text = text.replace(delimiter, SKILL_TAG_SEPARATOR)
+
+    tags: List[str] = []
+    for piece in text.split(SKILL_TAG_SEPARATOR):
+        tag = piece.strip()
+        if tag and tag not in tags:  # 去重但保留先后顺序
+            tags.append(tag)
+    return tags
+
+
+def join_skill_tags(raw: Optional[str]) -> str:
+    """规整成落库格式：`tag1;tag2`（空标签与重复项在这里就被丢掉）。"""
+    return SKILL_TAG_SEPARATOR.join(split_skill_tags(raw))
 
 
 class ResumePersonalInfo(PKMixin, TimestampMixin, Base):
@@ -96,6 +145,11 @@ class ResumePersonalInfo(PKMixin, TimestampMixin, Base):
     email: Mapped[str] = mapped_column(String(120), default="", comment="邮箱")
     city: Mapped[str] = mapped_column(String(100), default="", comment="现居城市")
     job_intention: Mapped[str] = mapped_column(String(100), default="", comment="求职意向")
+    current_status: Mapped[str] = mapped_column(
+        String(30),
+        default=ResumeCurrentStatus.EMPLOYED_OPEN.value,
+        comment="目前状态：resigned / left / employed_open / employed_closed",
+    )
     website: Mapped[str] = mapped_column(String(200), default="", comment="个人主页 / 作品集")
     remark: Mapped[str] = mapped_column(Text, default="", comment="备注")
     is_active: Mapped[bool] = mapped_column(
@@ -108,6 +162,11 @@ class ResumePersonalInfo(PKMixin, TimestampMixin, Base):
     def gender_text(self) -> str:
         """性别中文文案。"""
         return RESUME_GENDER_LABELS.get(self.gender, self.gender)
+
+    @property
+    def current_status_text(self) -> str:
+        """目前状态中文文案。"""
+        return RESUME_CURRENT_STATUS_LABELS.get(self.current_status, self.current_status)
 
     def __repr__(self) -> str:  # pragma: no cover - 调试用
         return f"<ResumePersonalInfo id={self.id} name={self.name!r}>"
@@ -216,7 +275,9 @@ class ResumeProject(PKMixin, TimestampMixin, Base):
     role: Mapped[str] = mapped_column(String(100), default="", comment="担任角色")
     start_month: Mapped[str] = mapped_column(String(7), default="", comment="开始时间，YYYY-MM")
     end_month: Mapped[str] = mapped_column(String(7), default="", comment="结束时间，YYYY-MM，空为至今")
-    description: Mapped[str] = mapped_column(Text, default="", comment="项目描述 / 职责 / 业绩")
+    description: Mapped[str] = mapped_column(Text, default="", comment="项目描述 / 背景")
+    duty: Mapped[str] = mapped_column(Text, default="", comment="项目职责：负责哪些模块 / 做了哪些事")
+    achievement: Mapped[str] = mapped_column(Text, default="", comment="项目业绩：产出的指标与结果")
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True, comment="是否启用"
     )
@@ -285,14 +346,60 @@ class ResumeEvaluation(PKMixin, TimestampMixin, Base):
         return f"<ResumeEvaluation id={self.id} name={self.name!r} title={self.title!r}>"
 
 
+class ResumeSkillTag(PKMixin, TimestampMixin, Base):
+    """技能标签：一条 = 某个人的一组技能（一个分类 + 该分类下的多个标签）。"""
+
+    __tablename__ = "resume_base_skill_tag"
+
+    personal_info_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("resume_base_personal_info.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        comment="所属个人信息 ID（简历主体）；老数据可能为空",
+    )
+    name: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True, comment="姓名（随所属个人信息同步）"
+    )
+    category: Mapped[str] = mapped_column(
+        String(50), default="", comment="标签分类，如「测试与自动化」"
+    )
+    tags: Mapped[str] = mapped_column(
+        Text, default="", comment="标签列表，半角分号分隔（Python;pytest;Playwright）"
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, comment="是否启用"
+    )
+    sort: Mapped[int] = mapped_column(Integer, default=0, comment="排序值，越小越靠前")
+
+    #: 只读关联（多对一）：出参需要带出所属个人
+    personal_info: Mapped[Optional["ResumePersonalInfo"]] = relationship(
+        "ResumePersonalInfo", lazy="joined"
+    )
+
+    # ------------------------- 派生属性（不落库） -------------------------
+    @property
+    def tag_list(self) -> List[str]:
+        """标签列表（把库里那串分号分隔的文本拆成数组，供接口直接返回）。"""
+        return split_skill_tags(self.tags)
+
+    def __repr__(self) -> str:  # pragma: no cover - 调试用
+        return f"<ResumeSkillTag id={self.id} category={self.category!r}>"
+
+
 __all__ = [
     "ResumePersonalInfo",
     "ResumeEducation",
     "ResumeWork",
     "ResumeProject",
     "ResumeEvaluation",
+    "ResumeSkillTag",
+    "SKILL_TAG_SEPARATOR",
+    "split_skill_tags",
+    "join_skill_tags",
     "ResumeGender",
     "RESUME_GENDER_LABELS",
+    "ResumeCurrentStatus",
+    "RESUME_CURRENT_STATUS_LABELS",
     "EducationDegree",
     "EDUCATION_DEGREE_LABELS",
 ]
