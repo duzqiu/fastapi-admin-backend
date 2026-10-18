@@ -46,6 +46,7 @@ class ResumePersonalInfoPublicOut(ORMBaseModel):
     job_intention: str = ""
     current_status: str = Field(default="", description="目前状态代码")
     current_status_text: str = Field(default="", description="目前状态中文文案")
+    work_years: int = Field(default=0, description="工作年限（年），0 表示未设置")
     website: str = ""
     remark: str = ""
 

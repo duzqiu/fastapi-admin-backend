@@ -57,6 +57,7 @@ class ResumePersonalInfoCreate(BaseModel):
         default=ResumeCurrentStatus.EMPLOYED_OPEN,
         description="目前状态：resigned / left / employed_open / employed_closed",
     )
+    work_years: int = Field(default=0, ge=0, le=80, description="工作年限（年），0 表示未设置")
     website: str = Field(default="", max_length=200, description="个人主页 / 作品集")
     remark: str = Field(default="", description="备注")
     is_active: bool = Field(default=True, description="是否启用")
@@ -78,6 +79,9 @@ class ResumePersonalInfoUpdate(BaseModel):
     job_intention: Optional[str] = Field(default=None, max_length=100)
     current_status: Optional[ResumeCurrentStatus] = Field(
         default=None, description="目前状态；不传保持原值"
+    )
+    work_years: Optional[int] = Field(
+        default=None, ge=0, le=80, description="工作年限（年）；不传保持原值"
     )
     website: Optional[str] = Field(default=None, max_length=200)
     remark: Optional[str] = Field(default=None)
@@ -106,6 +110,7 @@ class ResumePersonalInfoOut(ORMBaseModel):
     job_intention: str = ""
     current_status: str = ""
     current_status_text: str = Field(default="", description="目前状态中文文案")
+    work_years: int = Field(default=0, description="工作年限（年），0 表示未设置")
     website: str = ""
     remark: str = ""
     is_active: bool = Field(default=True, description="是否启用")

@@ -150,6 +150,9 @@ class ResumePersonalInfo(PKMixin, TimestampMixin, Base):
         default=ResumeCurrentStatus.EMPLOYED_OPEN.value,
         comment="目前状态：resigned / left / employed_open / employed_closed",
     )
+    work_years: Mapped[int] = mapped_column(
+        Integer, default=0, comment="工作年限（年），0 表示未设置"
+    )
     website: Mapped[str] = mapped_column(String(200), default="", comment="个人主页 / 作品集")
     remark: Mapped[str] = mapped_column(Text, default="", comment="备注")
     is_active: Mapped[bool] = mapped_column(
