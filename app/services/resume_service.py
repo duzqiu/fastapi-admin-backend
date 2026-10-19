@@ -661,9 +661,14 @@ class ResumeService:
                     _build_work_item(work, projects_by_work.get(work.id, []))
                     for work in works_by_person.get(person.id, [])
                 ],
+                # 自我评价全部返回，严格按后台配置的序号（sort）升序；
+                # 序号相同再按 id，保证多次请求顺序稳定。
                 evaluations=[
                     ResumeEvaluationItem.model_validate(item)
-                    for item in evaluations_by_person.get(person.id, [])
+                    for item in sorted(
+                        evaluations_by_person.get(person.id, []),
+                        key=lambda item: (item.sort, item.id),
+                    )
                 ],
                 skill_tags=[
                     _build_skill_tag_item(item)
