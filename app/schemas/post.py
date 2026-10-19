@@ -36,6 +36,28 @@ class PostCreate(BaseModel):
         return value.strip()
 
 
+class PostUpdate(BaseModel):
+    """被拒绝后修改并重新提交的入参。
+
+    只允许改内容；`status` 由服务端重置为「待审核」，客户端改不了，
+    否则等于绕过审核。
+    """
+
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    content: Optional[str] = Field(default=None, max_length=20000)
+    images: Optional[List[str]] = Field(default=None, max_length=9)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def strip_title(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("content")
+    @classmethod
+    def strip_content(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
 class PostStatusUpdate(BaseModel):
     """审核入参。"""
 
@@ -48,12 +70,20 @@ class PostOut(ORMBaseModel):
     id: int
     post_no: str = Field(default="", description="帖子编号（12 位随机数字，对外展示的帖子 ID）")
     publisher: str
+    publisher_avatar: str = Field(
+        default="", description="发布者头像地址（匿名发帖或未设置头像时为空）"
+    )
     member_id: Optional[int] = None
     title: str
     content: str
     images: List[str] = Field(default_factory=list)
     published_at: datetime
     status: str
+    is_favorited: bool = Field(
+        default=False,
+        description="当前登录会员是否已收藏（未登录恒为 false）",
+    )
+    favorite_count: int = Field(default=0, description="被收藏次数（全体会员）")
     created_at: datetime
     updated_at: datetime
 

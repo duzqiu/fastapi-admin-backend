@@ -213,6 +213,26 @@ class MemberOut(ORMBaseModel):
         return resolve_background_url(self.id, self.background)
 
 
+class MemberPublicOut(ORMBaseModel):
+    """会员公开资料（他人可见，帖子作者主页用）。
+
+    只出展示需要的字段：邮箱 / 手机号 / 生日等隐私一律不返回。
+    """
+
+    id: int
+    member_no: str = Field(default="", description="会员编号")
+    nickname: str = Field(default="", description="昵称")
+    avatar: str = Field(default="", description="库里存的头像值（原始值）")
+    bio: str = Field(default="", description="个人简介")
+    region: str = Field(default="", description="地区")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def avatar_url(self) -> str:
+        """可直接访问的头像地址：没上传过时是系统默认头像。"""
+        return resolve_avatar_url(self.id, self.avatar)
+
+
 class MemberListItem(ORMBaseModel):
     """会员列表项。
 

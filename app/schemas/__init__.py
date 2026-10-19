@@ -42,7 +42,7 @@ from app.schemas.dish_order import (
     OrderStatusUpdate,
 )
 from app.schemas.email import SendCodeRequest, SendCodeResponse
-from app.schemas.post import PostCreate, PostOut, PostStatusUpdate
+from app.schemas.post import PostCreate, PostOut, PostStatusUpdate, PostUpdate
 from app.schemas.resume import (
     ResumeEducationCreate,
     ResumeEducationOut,
@@ -82,6 +82,7 @@ from app.schemas.member import (
     MemberOut,
     MemberPasswordReset,
     MemberProfileUpdate,
+    MemberPublicOut,
     MemberRefresh,
     MemberRegister,
     MemberResetPassword,
@@ -142,6 +143,7 @@ __all__ = [
     "PostCreate",
     "PostOut",
     "PostStatusUpdate",
+    "PostUpdate",
     "MediaUploadOut",
     "MemberAdminUpdate",
     "MemberChangePassword",
@@ -150,6 +152,7 @@ __all__ = [
     "MemberOut",
     "MemberPasswordReset",
     "MemberProfileUpdate",
+    "MemberPublicOut",
     "MemberRefresh",
     "MemberRegister",
     "MemberResetPassword",

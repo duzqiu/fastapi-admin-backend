@@ -10,6 +10,7 @@ from app.api.v1.endpoints import (
     member_auth,
     member_countdowns,
     member_profile,
+    member_public,
     members,
     menu,
     posts,
@@ -29,6 +30,9 @@ api_router.include_router(users.router)
 api_router.include_router(member_auth.router)
 api_router.include_router(member_profile.router)
 api_router.include_router(member_countdowns.router)
+
+# 用户中心（会员）- 对外公开资料（帖子作者主页用，无需登录）
+api_router.include_router(member_public.router)
 
 # 点菜菜单（C 端）
 api_router.include_router(menu.router)
