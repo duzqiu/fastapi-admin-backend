@@ -13,6 +13,7 @@ from app.services.dish_service import DishService
 from app.services.email_code_service import EmailCodeService
 from app.services.member_auth_service import MemberAuthService
 from app.services.member_service import MemberService
+from app.services.post_service import PostService
 from app.services.resume_service import ResumeService
 from app.services.system_service import SystemService
 from app.services.user_service import UserService
@@ -25,6 +26,7 @@ __all__ = [
     "EmailCodeService",
     "MemberAuthService",
     "MemberService",
+    "PostService",
     "ResumeService",
     "SystemService",
     "UserService",

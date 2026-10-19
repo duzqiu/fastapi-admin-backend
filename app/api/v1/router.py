@@ -12,6 +12,7 @@ from app.api.v1.endpoints import (
     member_profile,
     members,
     menu,
+    posts,
     resume,
     resume_public,
     system,
@@ -38,6 +39,10 @@ api_router.include_router(dishes.router)
 api_router.include_router(dishes.category_router)
 api_router.include_router(dishes.tag_router)
 api_router.include_router(dish_orders.router)
+
+# 文章管理（用户发帖 + 后台审核）
+api_router.include_router(posts.public_router)
+api_router.include_router(posts.router)
 
 # 代办事项
 api_router.include_router(countdowns.router)

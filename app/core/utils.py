@@ -6,9 +6,11 @@ from typing import Optional
 
 # 会员编号长度（对外展示的短 ID）
 MEMBER_NO_LENGTH = 6
+# 帖子编号长度（对外展示的长 ID）
+POST_NO_LENGTH = 12
 
 
-def generate_member_no(length: int = MEMBER_NO_LENGTH) -> str:
+def generate_numeric_id(length: int) -> str:
     """生成指定长度的随机数字编号。
 
     首位不为 0，保证显示出来的位数固定（例如 6 位时范围是 100000-999999）。
@@ -16,6 +18,16 @@ def generate_member_no(length: int = MEMBER_NO_LENGTH) -> str:
     """
     smallest = 10 ** (length - 1)
     return str(smallest + secrets.randbelow(9 * smallest))
+
+
+def generate_member_no(length: int = MEMBER_NO_LENGTH) -> str:
+    """会员编号（默认 6 位随机数字）。"""
+    return generate_numeric_id(length)
+
+
+def generate_post_no(length: int = POST_NO_LENGTH) -> str:
+    """帖子编号（默认 12 位随机数字）。"""
+    return generate_numeric_id(length)
 
 
 def utcnow() -> datetime:

@@ -9,6 +9,7 @@ from app.models.dish import Dish, DishCategory, DishSpec, DishStatus, DishTag, d
 from app.models.dish_order import ORDER_TRANSITIONS, DishOrder, DishOrderItem, OrderStatus
 from app.models.email_code import EmailCode, EmailScene
 from app.models.member import Member, MemberGender
+from app.models.post import Post, PostStatus
 from app.models.resume import (
     EDUCATION_DEGREE_LABELS,
     RESUME_GENDER_LABELS,
@@ -44,6 +45,8 @@ __all__ = [
     "EmailScene",
     "Member",
     "MemberGender",
+    "Post",
+    "PostStatus",
     "ResumePersonalInfo",
     "ResumeEducation",
     "ResumeWork",

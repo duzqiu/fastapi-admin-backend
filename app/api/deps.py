@@ -28,6 +28,7 @@ from app.services.dish_service import DishService
 from app.services.email_code_service import EmailCodeService
 from app.services.member_auth_service import MemberAuthService
 from app.services.member_service import MemberService
+from app.services.post_service import PostService
 from app.services.resume_service import ResumeService
 from app.services.system_service import SystemService
 from app.services.user_service import UserService
@@ -113,6 +114,10 @@ def get_countdown_service(db: Session = Depends(get_db)) -> CountdownService:
 
 def get_resume_service(db: Session = Depends(get_db)) -> ResumeService:
     return ResumeService(db)
+
+
+def get_post_service(db: Session = Depends(get_db)) -> PostService:
+    return PostService(db)
 
 
 # ------------------------- 后台账号认证 / 鉴权 -------------------------

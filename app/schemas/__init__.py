@@ -42,6 +42,7 @@ from app.schemas.dish_order import (
     OrderStatusUpdate,
 )
 from app.schemas.email import SendCodeRequest, SendCodeResponse
+from app.schemas.post import PostCreate, PostOut, PostStatusUpdate
 from app.schemas.resume import (
     ResumeEducationCreate,
     ResumeEducationOut,
@@ -138,6 +139,9 @@ __all__ = [
     "OrderStatusUpdate",
     "SendCodeRequest",
     "SendCodeResponse",
+    "PostCreate",
+    "PostOut",
+    "PostStatusUpdate",
     "MediaUploadOut",
     "MemberAdminUpdate",
     "MemberChangePassword",
