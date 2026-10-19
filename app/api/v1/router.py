@@ -10,8 +10,10 @@ from app.api.v1.endpoints import (
     member_auth,
     member_countdowns,
     member_profile,
+    member_public,
     members,
     menu,
+    posts,
     resume,
     resume_public,
     system,
@@ -29,6 +31,9 @@ api_router.include_router(member_auth.router)
 api_router.include_router(member_profile.router)
 api_router.include_router(member_countdowns.router)
 
+# 用户中心（会员）- 对外公开资料（帖子作者主页用，无需登录）
+api_router.include_router(member_public.router)
+
 # 点菜菜单（C 端）
 api_router.include_router(menu.router)
 
@@ -38,6 +43,10 @@ api_router.include_router(dishes.router)
 api_router.include_router(dishes.category_router)
 api_router.include_router(dishes.tag_router)
 api_router.include_router(dish_orders.router)
+
+# 文章管理（用户发帖 + 后台审核）
+api_router.include_router(posts.public_router)
+api_router.include_router(posts.router)
 
 # 代办事项
 api_router.include_router(countdowns.router)

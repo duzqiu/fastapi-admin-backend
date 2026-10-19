@@ -17,6 +17,7 @@ from app.repositories.dish_repository import (
 )
 from app.repositories.email_code_repository import EmailCodeRepository
 from app.repositories.member_repository import MemberRepository
+from app.repositories.post_repository import PostRepository
 from app.repositories.resume_repository import (
     ResumeEducationRepository,
     ResumeEvaluationRepository,
@@ -36,6 +37,7 @@ __all__ = [
     "DishTagRepository",
     "EmailCodeRepository",
     "MemberRepository",
+    "PostRepository",
     "ResumePersonalInfoRepository",
     "ResumeEducationRepository",
     "ResumeWorkRepository",

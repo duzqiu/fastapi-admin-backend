@@ -783,3 +783,41 @@ def test_admin_member_management(client, auth_headers):
     # 删除
     assert client.delete(f"{API}/members/{member_id}", headers=auth_headers).status_code == 200
     assert client.get(f"{API}/members/{member_id}", headers=auth_headers).status_code == 404
+
+
+# ==================== 公开资料（帖子作者主页用，无需登录）====================
+def test_public_member_profile_needs_no_login(client):
+    """作者主页要的资料：不带令牌也能读到昵称 / 简介 / 头像，且不含隐私字段。"""
+    member = _register(client, "public-author@example.com")
+    headers = _member_headers(client, "public-author@example.com")
+    client.put(
+        f"{MEMBER_API}/profile", headers=headers, json={"bio": "写代码，也写生活"}
+    )
+
+    response = client.get(f"{API}/members/{member['id']}/public")  # 故意不带令牌
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert body["id"] == member["id"]
+    assert body["nickname"] == member["nickname"]
+    assert body["bio"] == "写代码，也写生活"
+    assert body["avatar_url"].startswith("/api/v1/")
+    # 隐私字段一律不出
+    for key in ("email", "phone", "birthday", "last_login_at"):
+        assert key not in body
+
+
+def test_public_member_profile_unknown_is_404(client):
+    """不存在的会员按 404 处理。"""
+    assert client.get(f"{API}/members/999999/public").status_code == 404
+
+
+def test_public_member_profile_disabled_is_404(client, auth_headers):
+    """被禁用的账号同样按不存在处理，别把账号状态暴露出去。"""
+    member = _register(client, "public-disabled@example.com")
+    client.patch(
+        f"{API}/members/{member['id']}/status",
+        headers=auth_headers,
+        json={"is_active": False},
+    )
+    assert client.get(f"{API}/members/{member['id']}/public").status_code == 404

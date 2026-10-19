@@ -434,6 +434,22 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 | POST | `/member/profile/background` | 上传背景图（multipart，≤5MB，与头像同一套存放规则） | 会员 |
 | POST | `/member/send-code` | 已登录获取「修改密码」邮箱验证码（邮箱取当前账号，无需传参） | 会员 |
 | POST | `/member/profile/change-password` | 修改密码：入参 `code` `new_password` `confirm_password` | 会员 |
+| GET | `/members/{id}/public` | 会员**公开资料**（昵称 / 头像 `avatar_url` / 简介 / 地区 / 会员编号），帖子作者主页用；不含邮箱手机号，被禁用按 404 | 公开 |
+
+### 文章（帖子）收藏 `/posts`（用户侧）
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| GET | `/posts/favorites` | 我收藏的帖子（按收藏时间倒序，只出已通过的） | 会员 |
+| POST | `/posts/{id}/favorite` | 收藏帖子（幂等；只能收藏已通过的帖子） | 会员 |
+| DELETE | `/posts/{id}/favorite` | 取消收藏（幂等，没收藏过也返回成功） | 会员 |
+
+帖子出参 `PostOut` 里另有两个收藏字段：
+
+- `is_favorited`：**按查看者**算，带会员令牌时按该会员的收藏返回，未登录恒为 `false`；
+- `favorite_count`：全体会员的收藏总数，收藏 / 取消时同步返回最新值。
+
+`GET /posts/latest`、`GET /posts/by-member/{id}`、`GET /posts/favorites` 都会带上它们。
 
 ### 会员管理（后台）`/members`（仅管理员）
 
