@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 from app.api.deps import get_current_admin, get_site_service
 from app.core.exceptions import BusinessError
 from app.schemas.site import (
+    AboutAccessOut,
     AboutPasswordStatusOut,
     AboutPasswordUpdate,
     AboutPasswordVerifyIn,
@@ -29,6 +30,15 @@ admin_router = APIRouter(
 @router.get("/welcome", response_model=SiteWelcomeOut, summary="首页欢迎语")
 def public_welcome(service: SiteService = Depends(get_site_service)) -> SiteWelcomeOut:
     return service.get_welcome()
+
+
+@router.get(
+    "/about/access",
+    response_model=AboutAccessOut,
+    summary="查询「关于我」是否需要密码",
+)
+def about_access(service: SiteService = Depends(get_site_service)) -> AboutAccessOut:
+    return AboutAccessOut(password_enabled=service.about_password_enabled())
 
 
 @router.post(
@@ -74,20 +84,31 @@ def update_welcome(
 def get_about_password_status(
     service: SiteService = Depends(get_site_service),
 ) -> AboutPasswordStatusOut:
-    return AboutPasswordStatusOut(configured=service.about_password_configured())
+    return AboutPasswordStatusOut(
+        configured=service.about_password_configured(),
+        enabled=service.about_password_enabled(),
+        password=service.about_password_text(),
+    )
 
 
 @admin_router.put(
     "/about-password",
-    response_model=AboutPasswordVerifyOut,
-    summary="设置关于我访问密码",
+    response_model=AboutPasswordStatusOut,
+    summary="设置关于我访问密码开关 / 新密码",
 )
 def update_about_password(
     payload: AboutPasswordUpdate,
     service: SiteService = Depends(get_site_service),
-) -> AboutPasswordVerifyOut:
-    service.update_about_password(payload.password)
-    return AboutPasswordVerifyOut(ok=True, message="密码已更新")
+) -> AboutPasswordStatusOut:
+    service.update_about_password(
+        enabled=payload.enabled,
+        password=payload.password,
+    )
+    return AboutPasswordStatusOut(
+        configured=service.about_password_configured(),
+        enabled=service.about_password_enabled(),
+        password=service.about_password_text(),
+    )
 
 
 __all__ = ["router", "admin_router"]

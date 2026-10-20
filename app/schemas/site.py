@@ -1,5 +1,7 @@
 """个人网站设置相关 Pydantic 模型。"""
 
+from typing import Optional
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -46,21 +48,30 @@ class AboutPasswordVerifyOut(BaseModel):
 
 class AboutPasswordStatusOut(BaseModel):
     configured: bool = Field(..., description="是否已经设置访问密码")
+    enabled: bool = Field(..., description="是否启用访问密码")
+    password: str = Field(default="", description="当前密码明文，仅后台回显用")
+
+
+class AboutAccessOut(BaseModel):
+    password_enabled: bool = Field(..., description="关于我是否需要密码")
 
 
 class AboutPasswordUpdate(BaseModel):
-    password: str = Field(
-        ...,
+    enabled: bool = Field(default=True, description="是否启用访问密码")
+    password: Optional[str] = Field(
+        default=None,
         min_length=4,
         max_length=64,
-        description="新密码，4-64 个字符，支持中文",
+        description="新密码，4-64 个字符，支持中文；不传表示保持原密码",
     )
 
-    @field_validator("password")
+    @field_validator("password", mode="before")
     @classmethod
-    def _not_blank(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("密码不能为空")
+    def _empty_to_none(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
         return value
 
 
@@ -70,5 +81,6 @@ __all__ = [
     "AboutPasswordVerifyIn",
     "AboutPasswordVerifyOut",
     "AboutPasswordStatusOut",
+    "AboutAccessOut",
     "AboutPasswordUpdate",
 ]

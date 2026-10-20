@@ -98,7 +98,9 @@ def create_initial_site_setting(db: Session) -> None:
             welcome_title=DEFAULT_WELCOME_TITLE,
             welcome_subtitle=DEFAULT_WELCOME_SUBTITLE,
             welcome_blessing=DEFAULT_WELCOME_BLESSING,
+            about_password_enabled=True,
             about_password_hash=hash_site_password(DEFAULT_ABOUT_PASSWORD),
+            about_password_text=DEFAULT_ABOUT_PASSWORD,
         )
     )
     db.commit()

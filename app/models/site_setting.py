@@ -5,7 +5,7 @@
 - 「关于我」访问密码：只存 bcrypt 哈希，不保存明文。
 """
 
-from sqlalchemy import String
+from sqlalchemy import Boolean, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -37,10 +37,20 @@ class SiteSetting(PKMixin, TimestampMixin, Base):
         default=DEFAULT_WELCOME_BLESSING,
         comment="品牌名下方的祝福语",
     )
+    about_password_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        comment="是否启用「关于我」访问密码",
+    )
     about_password_hash: Mapped[str] = mapped_column(
         String(255),
         default="",
         comment="「关于我」访问密码的 bcrypt 哈希",
+    )
+    about_password_text: Mapped[str] = mapped_column(
+        String(64),
+        default="",
+        comment="访问密码明文，仅用于后台回显；校验仍走哈希",
     )
 
     def __repr__(self) -> str:  # pragma: no cover - 调试用

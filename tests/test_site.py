@@ -3,6 +3,7 @@
 API = "/api/v1"
 PUBLIC_WELCOME = f"{API}/site/welcome"
 PUBLIC_VERIFY = f"{API}/site/about/verify"
+PUBLIC_ACCESS = f"{API}/site/about/access"
 ADMIN_WELCOME = f"{API}/site/admin/welcome"
 ADMIN_PASSWORD = f"{API}/site/admin/about-password"
 
@@ -42,12 +43,14 @@ def test_admin_update_welcome_and_password(client, auth_headers):
     status = client.get(ADMIN_PASSWORD, headers=auth_headers)
     assert status.status_code == 200
     assert status.json()["configured"] is True
+    assert status.json()["enabled"] is True
+    assert status.json()["password"] == "123456"
 
     # 最低 4 位，少于 4 位接口直接拒绝
     too_short = client.put(
         ADMIN_PASSWORD,
         headers=auth_headers,
-        json={"password": "abc"},
+        json={"enabled": True, "password": "abc"},
     )
     assert too_short.status_code == 422
 
@@ -58,9 +61,12 @@ def test_admin_update_welcome_and_password(client, auth_headers):
     changed = client.put(
         ADMIN_PASSWORD,
         headers=auth_headers,
-        json={"password": chinese_password},
+        json={"enabled": True, "password": chinese_password},
     )
     assert changed.status_code == 200, changed.text
+    assert client.get(
+        ADMIN_PASSWORD, headers=auth_headers
+    ).json()["password"] == chinese_password
 
     assert client.post(
         PUBLIC_VERIFY, json={"password": "123456"}
@@ -72,5 +78,28 @@ def test_admin_update_welcome_and_password(client, auth_headers):
         PUBLIC_VERIFY, json={"password": another_password}
     ).status_code == 400
 
-    # 复位，避免影响同一次测试会话里的其它用例
-    client.put(ADMIN_PASSWORD, headers=auth_headers, json={"password": "123456"})
+    # 关闭后不校验密码，公开状态接口同步返回 false
+    disabled = client.put(
+        ADMIN_PASSWORD,
+        headers=auth_headers,
+        json={"enabled": False},
+    )
+    assert disabled.status_code == 200, disabled.text
+    assert disabled.json()["enabled"] is False
+    assert client.get(PUBLIC_ACCESS).json()["password_enabled"] is False
+    assert client.post(
+        PUBLIC_VERIFY, json={"password": "任意错误密码"}
+    ).status_code == 200
+
+    # 重新开启并复位密码，避免影响同一次测试会话里的其它用例
+    re_enabled = client.put(
+        ADMIN_PASSWORD,
+        headers=auth_headers,
+        json={"enabled": True, "password": "123456"},
+    )
+    assert re_enabled.status_code == 200
+    assert re_enabled.json()["enabled"] is True
+    assert client.get(PUBLIC_ACCESS).json()["password_enabled"] is True
+    assert client.post(
+        PUBLIC_VERIFY, json={"password": "123456"}
+    ).status_code == 200
