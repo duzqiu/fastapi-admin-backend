@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.logging import logger
 from app.core.security import hash_password
+from app.core.site_password import hash_site_password
 from app.core.utils import generate_member_no, utcnow
 from app.db.base import Base
 from app.db.schema_sync import sync_missing_columns
@@ -33,9 +34,16 @@ from app.models import (  # noqa: F401  确保模型已注册
     DishTag,
     EmailCode,
     Member,
+    SiteSetting,
     User,
 )
 from app.models.member import MemberGender
+from app.models.site_setting import (
+    DEFAULT_ABOUT_PASSWORD,
+    DEFAULT_WELCOME_BLESSING,
+    DEFAULT_WELCOME_SUBTITLE,
+    DEFAULT_WELCOME_TITLE,
+)
 from app.models.user import UserRole
 
 # 用户中心演示会员（密码统一 members123，昵称/性别/生日为一个完整资料示例）
@@ -78,6 +86,25 @@ def create_tables() -> None:
     """根据 ORM 模型创建所有表（已存在的表不会重复创建）。"""
     Base.metadata.create_all(bind=engine)
     logger.info("数据库表已就绪: %s", ", ".join(Base.metadata.tables.keys()))
+
+
+def create_initial_site_setting(db: Session) -> None:
+    """写入站点设置单例（只在还没有时创建）。"""
+    if db.get(SiteSetting, 1) is not None:
+        return
+    db.add(
+        SiteSetting(
+            id=1,
+            welcome_title=DEFAULT_WELCOME_TITLE,
+            welcome_subtitle=DEFAULT_WELCOME_SUBTITLE,
+            welcome_blessing=DEFAULT_WELCOME_BLESSING,
+            about_password_hash=hash_site_password(DEFAULT_ABOUT_PASSWORD),
+        )
+    )
+    db.commit()
+    logger.info(
+        "已写入个人网站默认设置（关于我默认密码：%s）", DEFAULT_ABOUT_PASSWORD
+    )
 
 
 def create_initial_superuser(db: Session) -> None:
@@ -301,6 +328,7 @@ def init_db() -> None:
             create_initial_superuser(db)
             create_initial_members(db)
             create_initial_dishes(db)
+            create_initial_site_setting(db)
         finally:
             db.close()
     except SQLAlchemyError as error:

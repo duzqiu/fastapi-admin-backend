@@ -16,6 +16,7 @@ from app.api.v1.endpoints import (
     posts,
     resume,
     resume_public,
+    site,
     system,
     users,
 )
@@ -51,7 +52,7 @@ api_router.include_router(posts.router)
 # 代办事项
 api_router.include_router(countdowns.router)
 
-# 个人简历（独立类目：六组接口自成一体，不与其它域关联；组内按个人信息 / 公司经历分层绑定）
+# 个人网站-简历信息（独立类目：六组接口自成一体，不与其它域关联；组内按个人信息 / 公司经历分层绑定）
 api_router.include_router(resume.personal_router)
 api_router.include_router(resume.education_router)
 api_router.include_router(resume.work_router)
@@ -59,7 +60,11 @@ api_router.include_router(resume.project_router)
 api_router.include_router(resume.evaluation_router)
 api_router.include_router(resume.skill_tag_router)
 
-# 个人简历-对外接口（前台展示端用：无需登录、只出启用数据）
+# 个人网站-简历信息对外接口（前台展示端用：无需登录、只出启用数据）
 api_router.include_router(resume_public.router)
+
+# 个人网站设置（欢迎语 / 关于我密码）
+api_router.include_router(site.router)
+api_router.include_router(site.admin_router)
 
 api_router.include_router(system.router)

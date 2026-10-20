@@ -4,12 +4,12 @@
 不引用任何其它域的模型、仓储或接口；路径也统一收在 `/resume` 前缀下。
 
 OpenAPI（/docs）里会自成一个类目，下分六组：
-    后台-个人简历-个人信息   /resume/personal-infos
-    后台-个人简历-教育信息   /resume/educations
-    后台-个人简历-工作经历   /resume/work-experiences
-    后台-个人简历-项目经历   /resume/projects
-    后台-个人简历-自我评价   /resume/evaluations
-    后台-个人简历-技能标签   /resume/skill-tags
+    后台-个人网站-个人信息   /resume/personal-infos
+    后台-个人网站-教育信息   /resume/educations
+    后台-个人网站-工作经历   /resume/work-experiences
+    后台-个人网站-项目经历   /resume/projects
+    后台-个人网站-自我评价   /resume/evaluations
+    后台-个人网站-技能标签   /resume/skill-tags
 
 层级绑定（写入时必填）：
 - 教育 / 工作 / 自我评价 / 技能标签 绑定 `personal_info_id`（个人信息，即「简历主体」）；
@@ -61,32 +61,32 @@ admin_dependency = [Depends(get_current_admin)]
 
 personal_router = APIRouter(
     prefix=f"{RESUME_PREFIX}/personal-infos",
-    tags=["后台-个人简历-个人信息"],
+    tags=["后台-个人网站-个人信息"],
     dependencies=admin_dependency,
 )
 education_router = APIRouter(
     prefix=f"{RESUME_PREFIX}/educations",
-    tags=["后台-个人简历-教育信息"],
+    tags=["后台-个人网站-教育信息"],
     dependencies=admin_dependency,
 )
 work_router = APIRouter(
     prefix=f"{RESUME_PREFIX}/work-experiences",
-    tags=["后台-个人简历-工作经历"],
+    tags=["后台-个人网站-工作经历"],
     dependencies=admin_dependency,
 )
 project_router = APIRouter(
     prefix=f"{RESUME_PREFIX}/projects",
-    tags=["后台-个人简历-项目经历"],
+    tags=["后台-个人网站-项目经历"],
     dependencies=admin_dependency,
 )
 evaluation_router = APIRouter(
     prefix=f"{RESUME_PREFIX}/evaluations",
-    tags=["后台-个人简历-自我评价"],
+    tags=["后台-个人网站-自我评价"],
     dependencies=admin_dependency,
 )
 skill_tag_router = APIRouter(
     prefix=f"{RESUME_PREFIX}/skill-tags",
-    tags=["后台-个人简历-技能标签"],
+    tags=["后台-个人网站-技能标签"],
     dependencies=admin_dependency,
 )
 

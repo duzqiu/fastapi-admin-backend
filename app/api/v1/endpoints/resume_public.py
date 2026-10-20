@@ -30,7 +30,7 @@ from app.services.resume_service import ResumeService
 #: 对外开放前缀，与管理端 `/resume/*` 并列
 PUBLIC_PREFIX = "/resume/public"
 
-router = APIRouter(prefix=PUBLIC_PREFIX, tags=["前端-个人简历"])
+router = APIRouter(prefix=PUBLIC_PREFIX, tags=["前端-个人网站"])
 
 
 @router.get(

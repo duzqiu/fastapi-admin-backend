@@ -10,6 +10,13 @@ from app.models.dish_order import ORDER_TRANSITIONS, DishOrder, DishOrderItem, O
 from app.models.email_code import EmailCode, EmailScene
 from app.models.member import Member, MemberGender
 from app.models.post import Post, PostFavorite, PostStatus
+from app.models.site_setting import (
+    DEFAULT_ABOUT_PASSWORD,
+    DEFAULT_WELCOME_BLESSING,
+    DEFAULT_WELCOME_SUBTITLE,
+    DEFAULT_WELCOME_TITLE,
+    SiteSetting,
+)
 from app.models.resume import (
     EDUCATION_DEGREE_LABELS,
     RESUME_GENDER_LABELS,
@@ -48,6 +55,11 @@ __all__ = [
     "Post",
     "PostFavorite",
     "PostStatus",
+    "SiteSetting",
+    "DEFAULT_WELCOME_TITLE",
+    "DEFAULT_WELCOME_SUBTITLE",
+    "DEFAULT_WELCOME_BLESSING",
+    "DEFAULT_ABOUT_PASSWORD",
     "ResumePersonalInfo",
     "ResumeEducation",
     "ResumeWork",

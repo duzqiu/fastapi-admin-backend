@@ -30,6 +30,7 @@ from app.services.member_auth_service import MemberAuthService
 from app.services.member_service import MemberService
 from app.services.post_service import PostService
 from app.services.resume_service import ResumeService
+from app.services.site_service import SiteService
 from app.services.system_service import SystemService
 from app.services.user_service import UserService
 
@@ -118,6 +119,10 @@ def get_resume_service(db: Session = Depends(get_db)) -> ResumeService:
 
 def get_post_service(db: Session = Depends(get_db)) -> PostService:
     return PostService(db)
+
+
+def get_site_service(db: Session = Depends(get_db)) -> SiteService:
+    return SiteService(db)
 
 
 # ------------------------- 后台账号认证 / 鉴权 -------------------------

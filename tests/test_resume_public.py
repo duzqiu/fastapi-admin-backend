@@ -141,12 +141,12 @@ def test_public_openapi_is_separate(client):
 
     methods = schema["paths"][f"{PUBLIC}/profiles"]
     assert set(methods) == {"get"}
-    assert methods["get"]["tags"] == ["前端-个人简历"]
+    assert methods["get"]["tags"] == ["前端-个人网站"]
     assert not methods["get"].get("security")
 
     # 管理端同类接口依然要求鉴权，两边互不影响
     admin_get = schema["paths"][f"{API}/resume/personal-infos"]["get"]
-    assert admin_get["tags"] == ["后台-个人简历-个人信息"]
+    assert admin_get["tags"] == ["后台-个人网站-个人信息"]
 
 
 # ==================== 2. 传 ID：取指定用户的全部信息 ====================
