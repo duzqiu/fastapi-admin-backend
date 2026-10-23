@@ -1,18 +1,28 @@
-"""文章管理域 ORM 模型：用户发布的帖子（后台审核）与会员收藏。
+"""文章管理域 ORM 模型：用户发布的帖子（后台审核）、会员收藏与点赞。
 
 表名规范：`一级功能_二级功能_功能`
     article_post_info      ->  文章_帖子_信息
     article_post_favorite  ->  文章_帖子_收藏
+    article_post_like      ->  文章_帖子_点赞
 
 状态流转：用户发帖一律进「待审核」，后台审核后变为「已通过」或「已拒绝」。
-收藏是「会员 × 帖子」的多对多关系，同一会员同一帖子只会有一条记录。
+收藏 / 点赞都是「会员 × 帖子」的多对多关系，同一会员同一帖子只会有一条记录。
 """
 
 import enum
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.member_media import resolve_avatar_url
@@ -63,6 +73,12 @@ class Post(PKMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(
         String(20), default=PostStatus.PENDING.value, index=True, comment="审核状态"
     )
+    view_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        index=True,
+        comment="访问量：详情页被打开的次数（「热门」按它倒序）",
+    )
 
     # 发布会员（匿名发帖为空）：列表 / 详情要显示发布者头像，用 joined 一次查回来，
     # 不让每条帖子再多跑一次查询
@@ -90,7 +106,7 @@ class PostFavorite(PKMixin, TimestampMixin, Base):
     """会员收藏的帖子。
 
     `is_favorited` 是**按查看者**变化的字段，不落库：列表 / 详情出参时由服务层
-    按当前登录会员临时标上（见 `PostService._mark_favorites`），所以这里只管关系表。
+    按当前登录会员临时标上（见 `PostService._mark_interactions`），所以这里只管关系表。
     """
 
     __tablename__ = "article_post_favorite"
@@ -118,3 +134,37 @@ class PostFavorite(PKMixin, TimestampMixin, Base):
 
     def __repr__(self) -> str:  # pragma: no cover - 调试用
         return f"<PostFavorite member_id={self.member_id} post_id={self.post_id}>"
+
+
+class PostLike(PKMixin, TimestampMixin, Base):
+    """会员给帖子点的赞。
+
+    和收藏一样是「会员 × 帖子」的关系表：同一会员同一帖子只有一条记录，
+    重复点赞幂等。帖子上的 `like_count` / `is_liked` 都是出参时临时算的，不落库。
+    """
+
+    __tablename__ = "article_post_like"
+    __table_args__ = (
+        UniqueConstraint(
+            "member_id",
+            "post_id",
+            name="uq_article_post_like_member_post",
+        ),
+        Index("ix_article_post_like_post_created", "post_id", "created_at"),
+    )
+
+    member_id: Mapped[int] = mapped_column(
+        ForeignKey("member_account_info.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="点赞人（会员）",
+    )
+    post_id: Mapped[int] = mapped_column(
+        ForeignKey("article_post_info.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="被点赞的帖子",
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - 调试用
+        return f"<PostLike member_id={self.member_id} post_id={self.post_id}>"

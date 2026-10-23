@@ -214,6 +214,225 @@ def test_latest_pagination(client, auth_headers):
     )
 
 
+# ==================== 访问量 / 热门 ====================
+def test_view_count_increases_on_each_view(client, auth_headers):
+    """每次调 /view，访问量 +1，出参带最新值。"""
+    post = create_post(client, title="访问量-帖子")
+    client.patch(
+        f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
+    )
+    assert post["view_count"] == 0
+
+    first = client.post(f"{API}/{post['id']}/view")
+    assert first.status_code == 200, first.text
+    assert first.json()["view_count"] == 1
+
+    second = client.post(f"{API}/{post['id']}/view")
+    assert second.json()["view_count"] == 2
+
+    # 后台详情读到的也是累加后的值
+    detail = client.get(f"{API}/{post['id']}", headers=auth_headers).json()
+    assert detail["view_count"] == 2
+
+
+def test_view_count_404_for_missing_post(client):
+    """不存在的帖子不能计数。"""
+    assert client.post(f"{API}/999999/view").status_code == 404
+
+
+def test_hot_orders_by_view_count_desc(client, auth_headers):
+    """热门按访问量倒序；待审核的不出现。"""
+    low = create_post(client, title="热门-冷门")
+    high = create_post(client, title="热门-爆款")
+    pending = create_post(client, title="热门-待审")
+    for post in (low, high):
+        client.patch(
+            f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
+        )
+
+    for _ in range(3):
+        client.post(f"{API}/{high['id']}/view")
+    client.post(f"{API}/{low['id']}/view")
+
+    body = client.get(f"{API}/hot").json()
+    titles = [item["title"] for item in body["items"]]
+    assert titles.index("热门-爆款") < titles.index("热门-冷门")
+    assert "热门-待审" not in titles
+    assert all(item["status"] == "approved" for item in body["items"])
+
+
+def test_hot_pagination(client, auth_headers):
+    """热门支持分页，page_size 生效且两页不重复。"""
+    for index in range(3):
+        post = create_post(client, title=f"热门-分页-{index}")
+        client.patch(
+            f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
+        )
+
+    first = client.get(f"{API}/hot", params={"page": 1, "page_size": 2}).json()
+    assert first["page"] == 1 and first["page_size"] == 2
+    assert len(first["items"]) == 2
+    assert first["total"] >= 3
+
+    second = client.get(f"{API}/hot", params={"page": 2, "page_size": 2}).json()
+    assert len(second["items"]) >= 1
+    assert {item["id"] for item in first["items"]}.isdisjoint(
+        {item["id"] for item in second["items"]}
+    )
+
+
+# ==================== 推荐（近一年随机 10 条）====================
+def test_recommend_only_recent_approved(client, auth_headers):
+    """推荐只出近一年内已通过的帖子。"""
+    recent = create_post(
+        client, title="推荐-近期", published_at="2026-10-01T00:00:00"
+    )
+    old = create_post(
+        client, title="推荐-很久以前", published_at="2020-01-01T00:00:00"
+    )
+    pending = create_post(client, title="推荐-待审")
+    for post in (recent, old):
+        client.patch(
+            f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
+        )
+
+    response = client.get(f"{API}/recommend")
+    assert response.status_code == 200, response.text
+    items = response.json()
+    titles = {item["title"] for item in items}
+    # 随机抽样：只校验「不该出现的不出现」，不依赖某条一定被抽中
+    assert "推荐-很久以前" not in titles
+    assert "推荐-待审" not in titles
+    assert len(items) <= 10
+    assert all(item["status"] == "approved" for item in items)
+
+
+def test_recommend_at_most_10_without_duplicates(client, auth_headers):
+    """候选超过 10 条时只给 10 条，且不重复。"""
+    for index in range(12):
+        post = create_post(
+            client, title=f"推荐-批量-{index}", published_at="2026-10-01T00:00:00"
+        )
+        client.patch(
+            f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
+        )
+
+    items = client.get(f"{API}/recommend").json()
+    assert len(items) == 10
+    assert len({item["id"] for item in items}) == 10
+
+
+# ==================== 点赞 / 获赞总数 ====================
+def test_like_and_unlike_post(client, auth_headers):
+    """点赞 / 取消点赞：计数与 is_liked 回显，重复点赞幂等。"""
+    member_id, member = _register_member(client)
+    post = client.post(API, headers=member, json={"title": "点赞-帖子"}).json()
+    client.patch(
+        f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
+    )
+
+    liked = client.post(f"{API}/{post['id']}/like", headers=member)
+    assert liked.status_code == 200, liked.text
+    assert liked.json()["is_liked"] is True
+    assert liked.json()["like_count"] == 1
+
+    # 重复点赞不会多出计数
+    assert client.post(f"{API}/{post['id']}/like", headers=member).json()["like_count"] == 1
+    # 未登录不能点赞
+    assert client.post(f"{API}/{post['id']}/like").status_code == 401
+
+    removed = client.delete(f"{API}/{post['id']}/like", headers=member)
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["is_liked"] is False
+    assert removed.json()["like_count"] == 0
+
+
+def test_like_only_approved_post(client, auth_headers):
+    """待审核 / 已拒绝的帖子不能点赞。"""
+    member_id, member = _register_member(client)
+    post = client.post(API, headers=member, json={"title": "待审不能赞"}).json()
+    assert client.post(f"{API}/{post['id']}/like", headers=member).status_code == 400
+
+
+def test_received_likes_total(client, auth_headers):
+    """获赞总数 = 自己所有帖子收到的赞（含多篇帖子累加）。"""
+    author_id, author = _register_member(client)
+    fan_id, fan = _register_member(client)
+
+    first = client.post(API, headers=author, json={"title": "获赞-第一篇"}).json()
+    second = client.post(API, headers=author, json={"title": "获赞-第二篇"}).json()
+    for post in (first, second):
+        client.patch(
+            f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
+        )
+
+    client.post(f"{API}/{first['id']}/like", headers=fan)
+    client.post(f"{API}/{second['id']}/like", headers=fan)
+
+    body = client.get(f"{API}/received-likes", headers=author)
+    assert body.status_code == 200, body.text
+    assert body.json()["received_like_count"] == 2
+
+    # 只点赞别人的帖子：自己的获赞是 0
+    assert (
+        client.get(f"{API}/received-likes", headers=fan).json()["received_like_count"] == 0
+    )
+    # 未登录拿不到
+    assert client.get(f"{API}/received-likes").status_code == 401
+
+
+def test_received_like_posts_list(client, auth_headers):
+    """获赞列表：只出自己有赞的帖子，按获赞数倒序。"""
+    author_id, author = _register_member(client)
+    fan1_id, fan1 = _register_member(client)
+    fan2_id, fan2 = _register_member(client)
+
+    hot = client.post(API, headers=author, json={"title": "获赞列表-热门"}).json()
+    cold = client.post(API, headers=author, json={"title": "获赞列表-冷门"}).json()
+    unliked = client.post(API, headers=author, json={"title": "获赞列表-无人赞"}).json()
+    for post in (hot, cold, unliked):
+        client.patch(
+            f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
+        )
+
+    client.post(f"{API}/{hot['id']}/like", headers=fan1)
+    client.post(f"{API}/{hot['id']}/like", headers=fan2)
+    client.post(f"{API}/{cold['id']}/like", headers=fan1)
+
+    body = client.get(f"{API}/received-likes/posts", headers=author)
+    assert body.status_code == 200, body.text
+    data = body.json()
+    titles = [item["title"] for item in data["items"]]
+    assert titles == ["获赞列表-热门", "获赞列表-冷门"]
+    assert data["items"][0]["like_count"] == 2
+    assert data["items"][1]["like_count"] == 1
+    assert "获赞列表-无人赞" not in titles
+
+    # 没发过帖 / 没收到赞的会员看到空列表
+    assert client.get(f"{API}/received-likes/posts", headers=fan1).json()["total"] == 0
+    # 未登录拿不到
+    assert client.get(f"{API}/received-likes/posts").status_code == 401
+
+
+def test_latest_carries_like_info(client, auth_headers):
+    """列表出参带 like_count / is_liked（按查看者区分）。"""
+    member_id, member = _register_member(client)
+    post = client.post(API, headers=member, json={"title": "带点赞数的帖子"}).json()
+    client.patch(
+        f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
+    )
+    client.post(f"{API}/{post['id']}/like", headers=member)
+
+    guest_items = client.get(f"{API}/latest").json()["items"]
+    guest = next(item for item in guest_items if item["id"] == post["id"])
+    assert guest["like_count"] == 1
+    assert guest["is_liked"] is False
+
+    mine_items = client.get(f"{API}/latest", headers=member).json()["items"]
+    mine = next(item for item in mine_items if item["id"] == post["id"])
+    assert mine["is_liked"] is True
+
+
 # ==================== 按会员查已发布（C 端「我的帖子」）====================
 def test_member_posts_only_approved(client, auth_headers):
     """只出审核通过的帖子，待审核的不出现。"""
@@ -473,6 +692,12 @@ def test_favorite_toggles_state_in_lists(client, auth_headers):
     favorites = client.get(f"{API}/favorites", headers=member).json()
     assert [entry["id"] for entry in favorites["items"]] == [post["id"]]
     assert favorites["items"][0]["is_favorited"] is True
+
+    # 点赞信息也要带出来：收藏列表同样要能显示真实赞数 / 已点赞状态
+    client.post(f"{API}/{post['id']}/like", headers=member)
+    favorites = client.get(f"{API}/favorites", headers=member).json()
+    assert favorites["items"][0]["like_count"] == 1
+    assert favorites["items"][0]["is_liked"] is True
 
     removed = client.delete(f"{API}/{post['id']}/favorite", headers=member)
     assert removed.status_code == 200, removed.text

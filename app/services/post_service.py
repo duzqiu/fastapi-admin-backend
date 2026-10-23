@@ -3,6 +3,8 @@
 事务边界：仓储只 flush，commit 统一在本层执行。
 """
 
+import random
+from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from fastapi import UploadFile
@@ -13,7 +15,11 @@ from app.core.storage import save_image
 from app.core.utils import generate_post_no, utcnow
 from app.models.member import Member
 from app.models.post import Post, PostStatus
-from app.repositories.post_repository import PostFavoriteRepository, PostRepository
+from app.repositories.post_repository import (
+    PostFavoriteRepository,
+    PostLikeRepository,
+    PostRepository,
+)
 from app.schemas.post import PostCreate, PostUpdate
 
 # 审核状态的中文文案（报错信息里用，避免再引一次 schema）
@@ -45,25 +51,34 @@ class PostService:
         self.db = db
         self.posts = PostRepository(db)
         self.favorites = PostFavoriteRepository(db)
+        self.likes = PostLikeRepository(db)
 
-    def _mark_favorites(self, posts: List[Post], member: Optional[Member]) -> None:
-        """给帖子标上「是否已收藏」和「被收藏次数」。
+    def _mark_interactions(self, posts: List[Post], member: Optional[Member]) -> None:
+        """给帖子标上「是否已点赞 / 收藏」和「被点赞 / 收藏次数」。
 
-        这两个都是出参字段，不落库：
-        - `is_favorited` 按查看者算，未登录一律 False；
-        - `favorite_count` 是全体会员的收藏总数。
-        两者都用一次 `IN (...)` 批量查询取回，列表页不会因此多出 N 次查询。
+        这四个都是出参字段，不落库：
+        - `is_liked` / `is_favorited` 按查看者算，未登录一律 False；
+        - `like_count` / `favorite_count` 是全体会员的总数。
+        都用一次 `IN (...)` 批量查询取回，列表页不会因此多出 N 次查询。
         """
         ids = [post.id for post in posts if post.id]
-        counts = self.favorites.counts_for(ids)
+        like_counts = self.likes.counts_for(ids)
+        favorite_counts = self.favorites.counts_for(ids)
+        liked = (
+            self.likes.liked_post_ids(member.id, ids)
+            if member is not None and ids
+            else set()
+        )
         favorited = (
             self.favorites.favorited_post_ids(member.id, ids)
             if member is not None and ids
             else set()
         )
         for post in posts:
+            post.like_count = like_counts.get(post.id, 0)
+            post.is_liked = post.id in liked
+            post.favorite_count = favorite_counts.get(post.id, 0)
             post.is_favorited = post.id in favorited
-            post.favorite_count = counts.get(post.id, 0)
 
     def _generate_post_no(self) -> str:
         """生成一个未被占用的 12 位随机帖子编号。
@@ -119,8 +134,58 @@ class PostService:
             offset=(page - 1) * page_size,
             limit=page_size,
         )
-        self._mark_favorites(items, viewer)
+        self._mark_interactions(items, viewer)
         return items, total
+
+    def list_hot(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 10,
+        viewer: Optional[Member] = None,
+    ) -> Tuple[List[Post], int]:
+        """首页「热门」：全部已通过的帖子，按访问量倒序。
+
+        `viewer` 只用来标「我有没有收藏过」，不影响返回哪些帖子。
+        """
+        items, total = self.posts.list_hot(
+            offset=(page - 1) * page_size,
+            limit=page_size,
+        )
+        self._mark_interactions(items, viewer)
+        return items, total
+
+    # 推荐位：近一年内随机抽若干条
+    RECOMMEND_SIZE = 10
+    RECOMMEND_WINDOW_DAYS = 365
+    # 候选池上限：先取最近这一批，再从里面随机抽，避免全表随机排序
+    RECOMMEND_POOL_SIZE = 200
+
+    def list_recommend(
+        self,
+        *,
+        size: int = RECOMMEND_SIZE,
+        viewer: Optional[Member] = None,
+    ) -> List[Post]:
+        """首页「推荐」：近一年内发布的已通过帖子，随机取 `size` 条。
+
+        池子按发布时间倒序取最近 `RECOMMEND_POOL_SIZE` 条，再用 Python 抽样：
+        比 `ORDER BY random()` 更容易跨数据库（随机函数各家写法不同），
+        帖子量不大时也够用。
+        """
+        since = utcnow() - timedelta(days=self.RECOMMEND_WINDOW_DAYS)
+        pool = self.posts.list_published_since(since=since, limit=self.RECOMMEND_POOL_SIZE)
+        picked = random.sample(pool, min(size, len(pool)))
+        self._mark_interactions(picked, viewer)
+        return picked
+
+    def record_view(self, post_id: int) -> Post:
+        """记录一次访问（详情页打开时调用），返回带最新 `view_count` 的帖子。"""
+        post = self.get_or_404(post_id)
+        self.posts.increment_view(post.id)
+        self.db.commit()
+        self.db.refresh(post)
+        return post
 
     def list_member_posts(
         self,
@@ -144,7 +209,7 @@ class PostService:
             offset=(page - 1) * page_size,
             limit=page_size,
         )
-        self._mark_favorites(items, viewer)
+        self._mark_interactions(items, viewer)
         return items, total
 
     # ------------------------- 收藏 -------------------------
@@ -179,16 +244,70 @@ class PostService:
         post.favorite_count = self.favorites.count_for(post.id)
         return post
 
+    # ------------------------- 点赞 -------------------------
+    def like(self, post_id: int, member: Member) -> Post:
+        """给帖子点赞（幂等）：重复点赞不会报错，也不会多出记录。
+
+        和收藏一样，只允许给审核通过的帖子点赞。
+        """
+        post = self.get_or_404(post_id)
+        if post.status != PostStatus.APPROVED.value:
+            raise BusinessError("只能给审核通过的帖子点赞")
+
+        if self.likes.find(member.id, post.id) is None:
+            self.likes.create(member_id=member.id, post_id=post.id)
+            self.db.commit()
+
+        post.is_liked = True
+        post.like_count = self.likes.count_for(post.id)
+        return post
+
+    def unlike(self, post_id: int, member: Member) -> Post:
+        """取消点赞（幂等）：本来就没点过也返回成功。"""
+        post = self.get_or_404(post_id)
+
+        like = self.likes.find(member.id, post.id)
+        if like is not None:
+            self.likes.delete(like)
+            self.db.commit()
+
+        post.is_liked = False
+        post.like_count = self.likes.count_for(post.id)
+        return post
+
+    def received_likes(self, member_id: int) -> int:
+        """某会员的获赞总数：自己所有帖子被点赞的次数合计。"""
+        return self.likes.count_received(member_id)
+
+    def list_received_like_posts(
+        self,
+        member_id: int,
+        *,
+        page: int = 1,
+        page_size: int = 10,
+        viewer: Optional[Member] = None,
+    ) -> Tuple[List[Post], int]:
+        """「获赞的帖子」列表：我发布的、收到过赞的帖子，按获赞数倒序。"""
+        items, total = self.likes.list_posts_with_received_likes(
+            member_id,
+            offset=(page - 1) * page_size,
+            limit=page_size,
+        )
+        self._mark_interactions(items, viewer)
+        return items, total
+
     def list_favorites(
         self,
         member_id: int,
         *,
         page: int = 1,
         page_size: int = 10,
+        viewer: Optional[Member] = None,
     ) -> Tuple[List[Post], int]:
         """当前会员收藏的帖子，最近收藏的在前。
 
         只出已通过审核的：收藏后来被拒 / 被删的帖子不再出现在「我的收藏」里。
+        `viewer` 用来标「是否已点赞 / 收藏」并带出两者的计数（默认就是本人）。
         """
         items, total = self.favorites.list_posts(
             member_id,
@@ -196,10 +315,7 @@ class PostService:
             offset=(page - 1) * page_size,
             limit=page_size,
         )
-        counts = self.favorites.counts_for([post.id for post in items])
-        for post in items:
-            post.is_favorited = True
-            post.favorite_count = counts.get(post.id, 0)
+        self._mark_interactions(items, viewer)
         return items, total
 
     # ------------------------- 写入 -------------------------

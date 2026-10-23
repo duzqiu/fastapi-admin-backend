@@ -79,6 +79,12 @@ class PostOut(ORMBaseModel):
     images: List[str] = Field(default_factory=list)
     published_at: datetime
     status: str
+    view_count: int = Field(default=0, description="访问量：详情页被打开的次数")
+    is_liked: bool = Field(
+        default=False,
+        description="当前登录会员是否已点赞（未登录恒为 false）",
+    )
+    like_count: int = Field(default=0, description="被点赞次数（全体会员）")
     is_favorited: bool = Field(
         default=False,
         description="当前登录会员是否已收藏（未登录恒为 false）",
@@ -103,3 +109,11 @@ class PostOut(ORMBaseModel):
             PostStatus.REJECTED.value: "已拒绝",
         }
         return labels.get(self.status, self.status)
+
+
+class PostReceivedLikesOut(BaseModel):
+    """当前会员的获赞汇总：自己所有帖子被点赞的次数合计。"""
+
+    received_like_count: int = Field(
+        default=0, description="获赞总数（所有帖子合计，含待审核 / 已拒绝）"
+    )

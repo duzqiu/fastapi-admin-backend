@@ -9,7 +9,7 @@ from app.models.dish import Dish, DishCategory, DishSpec, DishStatus, DishTag, d
 from app.models.dish_order import ORDER_TRANSITIONS, DishOrder, DishOrderItem, OrderStatus
 from app.models.email_code import EmailCode, EmailScene
 from app.models.member import Member, MemberGender
-from app.models.post import Post, PostFavorite, PostStatus
+from app.models.post import Post, PostFavorite, PostLike, PostStatus
 from app.models.site_setting import (
     DEFAULT_ABOUT_PASSWORD,
     DEFAULT_WELCOME_BLESSING,
@@ -54,6 +54,7 @@ __all__ = [
     "MemberGender",
     "Post",
     "PostFavorite",
+    "PostLike",
     "PostStatus",
     "SiteSetting",
     "DEFAULT_WELCOME_TITLE",
