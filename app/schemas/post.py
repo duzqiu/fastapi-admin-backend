@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, computed_field, field_validator
 
-from app.models.post import PostStatus
+from app.models.post import CommentStatus, PostStatus
 from app.schemas.common import ORMBaseModel
 
 
@@ -74,6 +74,10 @@ class PostOut(ORMBaseModel):
         default="", description="发布者头像地址（匿名发帖或未设置头像时为空）"
     )
     member_id: Optional[int] = None
+    is_following: bool = Field(
+        default=False,
+        description="当前登录会员是否已关注作者（未登录 / 匿名帖恒为 false）",
+    )
     title: str
     content: str
     images: List[str] = Field(default_factory=list)
@@ -85,6 +89,7 @@ class PostOut(ORMBaseModel):
         description="当前登录会员是否已点赞（未登录恒为 false）",
     )
     like_count: int = Field(default=0, description="被点赞次数（全体会员）")
+    comment_count: int = Field(default=0, description="已通过审核的评论数")
     is_favorited: bool = Field(
         default=False,
         description="当前登录会员是否已收藏（未登录恒为 false）",
@@ -117,3 +122,67 @@ class PostReceivedLikesOut(BaseModel):
     received_like_count: int = Field(
         default=0, description="获赞总数（所有帖子合计，含待审核 / 已拒绝）"
     )
+
+
+# ------------------------- 评论 -------------------------
+class PostReceivedCommentsOut(BaseModel):
+    """当前会员的被评论汇总：自己所有帖子收到的（已通过）评论数。"""
+
+    received_comment_count: int = Field(
+        default=0, description="被评论总数（只算已通过审核的评论）"
+    )
+
+
+class PostCommentCreate(BaseModel):
+    """发表评论入参。"""
+
+    content: str = Field(..., min_length=1, max_length=500, description="评论内容")
+
+    @field_validator("content")
+    @classmethod
+    def strip_content(cls, value: str) -> str:
+        """去掉首尾空白再校验，避免「全是空格」的评论混过去。"""
+        return value.strip()
+
+
+class PostCommentStatusUpdate(BaseModel):
+    """评论审核入参。"""
+
+    status: CommentStatus = Field(
+        ..., description="审核结果：approved（已通过）/ rejected（已拒绝）"
+    )
+
+    @field_validator("status")
+    @classmethod
+    def check_status(cls, value: CommentStatus) -> CommentStatus:
+        if value not in (CommentStatus.APPROVED, CommentStatus.REJECTED):
+            raise ValueError("审核结果只能是 approved 或 rejected")
+        return value
+
+
+class PostCommentOut(ORMBaseModel):
+    """评论出参（前台展示与后台管理共用）。"""
+
+    id: int
+    post_id: int
+    post_title: str = Field(default="", description="所属帖子标题")
+    post_no: str = Field(default="", description="所属帖子编号")
+    member_id: Optional[int] = None
+    publisher: str = ""
+    publisher_avatar: str = Field(
+        default="", description="评论人头像地址（未上传时为空串）"
+    )
+    content: str
+    status: str
+    created_at: datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def status_text(self) -> str:
+        """审核状态的中文文案。"""
+        labels = {
+            CommentStatus.PENDING.value: "待审核",
+            CommentStatus.APPROVED.value: "已通过",
+            CommentStatus.REJECTED.value: "已拒绝",
+        }
+        return labels.get(self.status, self.status)

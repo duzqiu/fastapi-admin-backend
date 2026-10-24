@@ -28,6 +28,7 @@ from app.services.dish_service import DishService
 from app.services.email_code_service import EmailCodeService
 from app.services.member_auth_service import MemberAuthService
 from app.services.member_service import MemberService
+from app.services.message_service import MessageService
 from app.services.post_service import PostService
 from app.services.resume_service import ResumeService
 from app.services.site_service import SiteService
@@ -119,6 +120,10 @@ def get_resume_service(db: Session = Depends(get_db)) -> ResumeService:
 
 def get_post_service(db: Session = Depends(get_db)) -> PostService:
     return PostService(db)
+
+
+def get_message_service(db: Session = Depends(get_db)) -> MessageService:
+    return MessageService(db)
 
 
 def get_site_service(db: Session = Depends(get_db)) -> SiteService:

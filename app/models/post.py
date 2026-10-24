@@ -1,11 +1,12 @@
-"""文章管理域 ORM 模型：用户发布的帖子（后台审核）、会员收藏与点赞。
+"""文章管理域 ORM 模型：帖子（后台审核）、收藏、点赞与评论。
 
 表名规范：`一级功能_二级功能_功能`
     article_post_info      ->  文章_帖子_信息
     article_post_favorite  ->  文章_帖子_收藏
     article_post_like      ->  文章_帖子_点赞
+    article_post_comment   ->  文章_帖子_评论
 
-状态流转：用户发帖一律进「待审核」，后台审核后变为「已通过」或「已拒绝」。
+状态流转：用户发帖 / 发评论一律进「待审核」，后台审核后变为「已通过」或「已拒绝」。
 收藏 / 点赞都是「会员 × 帖子」的多对多关系，同一会员同一帖子只会有一条记录。
 """
 
@@ -36,6 +37,14 @@ class PostStatus(str, enum.Enum):
 
     PENDING = "pending"    # 待审核（用户发帖后的默认状态）
     APPROVED = "approved"  # 已通过
+    REJECTED = "rejected"  # 已拒绝
+
+
+class CommentStatus(str, enum.Enum):
+    """评论审核状态。"""
+
+    PENDING = "pending"    # 待审核（发评论后的默认状态）
+    APPROVED = "approved"  # 已通过（前台才展示）
     REJECTED = "rejected"  # 已拒绝
 
 
@@ -168,3 +177,73 @@ class PostLike(PKMixin, TimestampMixin, Base):
 
     def __repr__(self) -> str:  # pragma: no cover - 调试用
         return f"<PostLike member_id={self.member_id} post_id={self.post_id}>"
+
+
+class PostComment(PKMixin, TimestampMixin, Base):
+    """帖子评论：一条 = 某会员在某条帖子下的一条评论。
+
+    和帖子一样有审核状态：用户发出后是「待审核」，后台审核为「已通过」后
+    前台（App 详情页）才展示；「已拒绝」只在后台可见。
+    """
+
+    __tablename__ = "article_post_comment"
+    __table_args__ = (
+        Index(
+            "ix_article_post_comment_post_status",
+            "post_id",
+            "status",
+            "created_at",
+        ),
+    )
+
+    post_id: Mapped[int] = mapped_column(
+        ForeignKey("article_post_info.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="所属帖子",
+    )
+    member_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("member_account_info.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="评论人（未登录时代为空）",
+    )
+    publisher: Mapped[str] = mapped_column(
+        String(50), default="", comment="评论人昵称（发评论时的快照）"
+    )
+    content: Mapped[str] = mapped_column(Text, default="", comment="评论内容")
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=CommentStatus.PENDING.value,
+        index=True,
+        comment="审核状态：pending / approved / rejected",
+    )
+
+    # 评论人（一条评论最多关联一个会员）：列表要显示头像，用 joined 一次查回来
+    member: Mapped[Optional["Member"]] = relationship(  # noqa: F821
+        "Member", lazy="joined"
+    )
+
+    # 所属帖子：后台评论列表要显示帖子标题
+    post: Mapped["Post"] = relationship("Post", lazy="joined")
+
+    @property
+    def post_title(self) -> str:
+        """所属帖子标题（后台列表展示用）。"""
+        return self.post.title if self.post else ""
+
+    @property
+    def post_no(self) -> str:
+        """所属帖子编号（后台定位用）。"""
+        return self.post.post_no if self.post else ""
+
+    @property
+    def publisher_avatar(self) -> str:
+        """评论人头像地址（未登录 / 没上传头像时为空串，前端退回首字头像）。"""
+        if self.member is None:
+            return ""
+        url = resolve_avatar_url(self.member.id, self.member.avatar)
+        return "" if url.lower().split("?")[0].endswith(".svg") else url
+
+    def __repr__(self) -> str:  # pragma: no cover - 调试用
+        return f"<PostComment id={self.id} post_id={self.post_id} status={self.status}>"

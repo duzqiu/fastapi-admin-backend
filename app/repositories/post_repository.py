@@ -6,7 +6,14 @@ from typing import Any, List, Optional, Tuple
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
-from app.models.post import Post, PostFavorite, PostLike, PostStatus
+from app.models.post import (
+    CommentStatus,
+    Post,
+    PostComment,
+    PostFavorite,
+    PostLike,
+    PostStatus,
+)
 from app.repositories.base import BaseRepository
 
 
@@ -59,6 +66,22 @@ class PostRepository(BaseRepository[Post]):
         """所有「已通过」的帖子，按发布时间倒序（首页「最新」用）。"""
         return self.list(
             conditions=[Post.status == PostStatus.APPROVED.value],
+            order_by=(Post.published_at.desc(), Post.id.desc()),
+            offset=offset,
+            limit=limit,
+        )
+
+    def list_published_by_authors(
+        self, author_ids: List[int], *, offset: int = 0, limit: int = 10
+    ) -> Tuple[List[Post], int]:
+        """指定作者（我关注的人）已通过的帖子，按发布时间倒序。"""
+        if not author_ids:
+            return [], 0
+        return self.list(
+            conditions=[
+                Post.status == PostStatus.APPROVED.value,
+                Post.member_id.in_(list(author_ids)),
+            ],
             order_by=(Post.published_at.desc(), Post.id.desc()),
             offset=offset,
             limit=limit,
@@ -211,6 +234,124 @@ class PostFavoriteRepository(BaseRepository[PostFavorite]):
         total = int(self.db.execute(count_stmt).scalar_one())
         items = list(self.db.execute(stmt).scalars().unique().all())
         return items, total
+
+
+class PostCommentRepository(BaseRepository[PostComment]):
+    """帖子评论的数据访问对象。"""
+
+    def __init__(self, db: Session) -> None:
+        super().__init__(PostComment, db)
+
+    def list_by_post(
+        self,
+        post_id: int,
+        *,
+        statuses: Tuple[str, ...] = (CommentStatus.APPROVED.value,),
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Tuple[List[PostComment], int]:
+        """某条帖子下的评论（前台默认只出已通过的），最新的在前。"""
+        return self.list(
+            conditions=[
+                PostComment.post_id == post_id,
+                PostComment.status.in_(statuses),
+            ],
+            order_by=(PostComment.created_at.desc(), PostComment.id.desc()),
+            offset=offset,
+            limit=limit,
+        )
+
+    def counts_for(
+        self,
+        post_ids: list[int],
+        *,
+        statuses: Tuple[str, ...] = (CommentStatus.APPROVED.value,),
+    ) -> dict[int, int]:
+        """批量取每条帖子的评论数（列表页用，避免逐条 count）。"""
+        if not post_ids:
+            return {}
+        stmt = (
+            select(PostComment.post_id, func.count())
+            .where(
+                PostComment.post_id.in_(list(post_ids)),
+                PostComment.status.in_(statuses),
+            )
+            .group_by(PostComment.post_id)
+        )
+        return {row[0]: int(row[1]) for row in self.db.execute(stmt).all()}
+
+    def count_received(self, member_id: int) -> int:
+        """某会员「收到」的已通过评论总数（他所有帖子合计）。"""
+        stmt = (
+            select(func.count())
+            .select_from(PostComment)
+            .join(Post, Post.id == PostComment.post_id)
+            .where(
+                Post.member_id == member_id,
+                PostComment.status == CommentStatus.APPROVED.value,
+            )
+        )
+        return int(self.db.execute(stmt).scalar_one())
+
+    def list_posts_with_comments(
+        self, member_id: int, *, offset: int = 0, limit: int = 10
+    ) -> Tuple[List[Post], int]:
+        """我发布的、收到过（已通过）评论的帖子，按评论数倒序。"""
+        comment_count = (
+            select(func.count(PostComment.id))
+            .where(
+                PostComment.post_id == Post.id,
+                PostComment.status == CommentStatus.APPROVED.value,
+            )
+            .correlate(Post)
+            .scalar_subquery()
+        )
+        conditions = [Post.member_id == member_id, comment_count > 0]
+
+        count_stmt = select(func.count()).select_from(Post).where(*conditions)
+        stmt = (
+            select(Post)
+            .where(*conditions)
+            .order_by(comment_count.desc(), Post.published_at.desc(), Post.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        total = int(self.db.execute(count_stmt).scalar_one())
+        items = list(self.db.execute(stmt).scalars().unique().all())
+        return items, total
+
+    def search(
+        self,
+        *,
+        keyword: Optional[str] = None,
+        status: Optional[str] = None,
+        post_id: Optional[int] = None,
+        offset: int = 0,
+        limit: int = 10,
+    ) -> Tuple[List[PostComment], int]:
+        """后台评论列表：按内容 / 评论人 / 帖子编号搜索，可按状态与帖子筛选。"""
+        conditions: List[Any] = []
+        if keyword:
+            like = f"%{keyword.strip()}%"
+            # 关键字同时匹配：评论内容 / 评论人 / 所属帖子的 12 位编号
+            conditions.append(
+                or_(
+                    PostComment.content.like(like),
+                    PostComment.publisher.like(like),
+                    PostComment.post.has(Post.post_no.like(like)),
+                )
+            )
+        if status:
+            conditions.append(PostComment.status == status)
+        if post_id:
+            conditions.append(PostComment.post_id == post_id)
+
+        return self.list(
+            conditions=conditions,
+            order_by=(PostComment.created_at.desc(), PostComment.id.desc()),
+            offset=offset,
+            limit=limit,
+        )
 
 
 class PostLikeRepository(BaseRepository[PostLike]):

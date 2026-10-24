@@ -173,7 +173,9 @@ class MemberOut(ORMBaseModel):
     """会员详情出参（绝不返回密码哈希）。"""
 
     id: int
-    member_no: str = Field(default="", description="会员编号（注册时随机生成的 6 位唯一 ID）")
+    member_no: str = Field(
+        default="", description="会员编号（新注册为 10 位唯一 ID，老用户仍是 6 位）"
+    )
     email: str
     nickname: str
     display_name: str = ""
@@ -225,6 +227,10 @@ class MemberPublicOut(ORMBaseModel):
     avatar: str = Field(default="", description="库里存的头像值（原始值）")
     bio: str = Field(default="", description="个人简介")
     region: str = Field(default="", description="地区")
+    is_following: bool = Field(
+        default=False,
+        description="当前登录会员是否已关注 TA（未登录恒为 false）",
+    )
 
     @computed_field  # type: ignore[prop-decorator]
     @property

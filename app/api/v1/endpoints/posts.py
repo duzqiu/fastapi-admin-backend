@@ -17,11 +17,15 @@ from app.api.deps import (
     get_post_service,
 )
 from app.models.member import Member
-from app.models.post import PostStatus
+from app.models.post import CommentStatus, PostStatus
 from app.schemas.common import MessageResponse, PageResult, UploadOut
 from app.schemas.post import (
+    PostCommentCreate,
+    PostCommentOut,
+    PostCommentStatusUpdate,
     PostCreate,
     PostOut,
+    PostReceivedCommentsOut,
     PostReceivedLikesOut,
     PostStatusUpdate,
     PostUpdate,
@@ -35,6 +39,13 @@ router = APIRouter(
 )
 
 public_router = APIRouter(prefix="/posts", tags=["文章-用户发帖"])
+
+#: 后台评论管理：列表 / 审核 / 删除（必须管理员）
+comment_router = APIRouter(
+    prefix="/comments",
+    tags=["后台-文章管理-评论"],
+    dependencies=[Depends(get_current_admin)],
+)
 
 
 # ------------------------- 用户发帖 -------------------------
@@ -142,6 +153,44 @@ def list_member_published_posts(
         page=page_params.page,
         page_size=page_params.page_size,
         include_hidden=is_owner,
+        viewer=member,
+    )
+    return PageResult.create(items, total, page_params.page, page_params.page_size)
+
+
+@public_router.get(
+    "/detail/{post_id}",
+    response_model=PostOut,
+    summary="帖子详情（公开，仅已通过；App 消息跳转用）",
+)
+def get_public_post(
+    post_id: int,
+    member: Optional[Member] = Depends(get_optional_member),
+    service: PostService = Depends(get_post_service),
+) -> PostOut:
+    """已通过的帖子详情；未通过 / 不存在的都回 404。
+
+    单独开一条 `detail/` 前缀，避免和后台的 `GET /posts/{id}` 抢同一个路径。
+    """
+    return service.get_public_post(post_id, viewer=member)
+
+
+# ------------------------- 关注动态 -------------------------
+@public_router.get(
+    "/following",
+    response_model=PageResult[PostOut],
+    summary="关注动态（我关注的人发的帖子，需登录）",
+)
+def list_following_posts(
+    page_params: PageParams = Depends(),
+    member: Member = Depends(get_current_member),
+    service: PostService = Depends(get_post_service),
+) -> PageResult[PostOut]:
+    """「关注」页：我关注的人发布的、已审核通过的帖子，按发布时间倒序。"""
+    items, total = service.list_following_posts(
+        member.id,
+        page=page_params.page,
+        page_size=page_params.page_size,
         viewer=member,
     )
     return PageResult.create(items, total, page_params.page, page_params.page_size)
@@ -270,6 +319,77 @@ def unlike_post(
     return service.unlike(post_id, member)
 
 
+# ------------------------- 评论 -------------------------
+@public_router.get(
+    "/received-comments",
+    response_model=PostReceivedCommentsOut,
+    summary="我的被评论总数（需登录）",
+)
+def get_received_comments(
+    member: Member = Depends(get_current_member),
+    service: PostService = Depends(get_post_service),
+) -> PostReceivedCommentsOut:
+    """当前登录会员的被评论总数：自己所有帖子收到的已通过评论合计。"""
+    return PostReceivedCommentsOut(
+        received_comment_count=service.received_comments(member.id)
+    )
+
+
+@public_router.get(
+    "/commented-posts",
+    response_model=PageResult[PostOut],
+    summary="我发布的被评论帖子列表（需登录）",
+)
+def list_commented_posts(
+    page_params: PageParams = Depends(),
+    member: Member = Depends(get_current_member),
+    service: PostService = Depends(get_post_service),
+) -> PageResult[PostOut]:
+    """「我的 ▸ 评论」列表：我发布的、收到过已通过评论的帖子，按评论数倒序。"""
+    items, total = service.list_commented_posts(
+        member.id,
+        page=page_params.page,
+        page_size=page_params.page_size,
+        viewer=member,
+    )
+    return PageResult.create(items, total, page_params.page, page_params.page_size)
+
+
+@public_router.post(
+    "/{post_id}/comments",
+    response_model=PostCommentOut,
+    status_code=http_status.HTTP_201_CREATED,
+    summary="发表评论（需登录，默认待审核）",
+)
+def create_comment(
+    post_id: int,
+    payload: PostCommentCreate,
+    member: Member = Depends(get_current_member),
+    service: PostService = Depends(get_post_service),
+) -> PostCommentOut:
+    """在已通过的帖子下发一条评论；发出后是「待审核」，后台通过后前台才展示。"""
+    return service.create_comment(post_id, payload, member)
+
+
+@public_router.get(
+    "/{post_id}/comments",
+    response_model=PageResult[PostCommentOut],
+    summary="帖子的评论（只出已通过，无需登录）",
+)
+def list_post_comments(
+    post_id: int,
+    page_params: PageParams = Depends(),
+    service: PostService = Depends(get_post_service),
+) -> PageResult[PostCommentOut]:
+    """帖子详情页展示的评论列表：只出已通过审核的，最新的在前。"""
+    items, total = service.list_comments(
+        post_id,
+        page=page_params.page,
+        page_size=page_params.page_size,
+    )
+    return PageResult.create(items, total, page_params.page, page_params.page_size)
+
+
 # ------------------------- 访问量 -------------------------
 @public_router.post(
     "/{post_id}/view",
@@ -354,4 +474,50 @@ def delete_post(
     service: PostService = Depends(get_post_service),
 ) -> MessageResponse:
     service.delete_post(post_id)
+    return MessageResponse(message="删除成功")
+
+
+# ------------------------- 后台评论管理 -------------------------
+@comment_router.get(
+    "", response_model=PageResult[PostCommentOut], summary="评论列表（分页 + 筛选）"
+)
+def list_comments(
+    page_params: PageParams = Depends(),
+    keyword: Optional[str] = Query(
+        None, description="评论内容 / 评论人 / 帖子编号 模糊搜索"
+    ),
+    status: Optional[CommentStatus] = Query(None, description="审核状态筛选"),
+    post_id: Optional[int] = Query(None, description="按帖子筛选"),
+    service: PostService = Depends(get_post_service),
+) -> PageResult[PostCommentOut]:
+    items, total = service.list_all_comments(
+        page=page_params.page,
+        page_size=page_params.page_size,
+        keyword=keyword,
+        status=status,
+        post_id=post_id,
+    )
+    return PageResult.create(items, total, page_params.page, page_params.page_size)
+
+
+@comment_router.patch(
+    "/{comment_id}/status", response_model=PostCommentOut, summary="审核评论（通过 / 拒绝）"
+)
+def audit_comment(
+    comment_id: int,
+    payload: PostCommentStatusUpdate,
+    service: PostService = Depends(get_post_service),
+) -> PostCommentOut:
+    """把待审核的评论改为「已通过」或「已拒绝」；审核后是终态。"""
+    return service.audit_comment(comment_id, payload.status)
+
+
+@comment_router.delete(
+    "/{comment_id}", response_model=MessageResponse, summary="删除评论"
+)
+def delete_comment(
+    comment_id: int,
+    service: PostService = Depends(get_post_service),
+) -> MessageResponse:
+    service.delete_comment(comment_id)
     return MessageResponse(message="删除成功")

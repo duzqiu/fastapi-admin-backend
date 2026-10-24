@@ -8,8 +8,16 @@ from app.models.countdown import COUNTDOWN_CYCLE_LABELS, Countdown, CountdownCyc
 from app.models.dish import Dish, DishCategory, DishSpec, DishStatus, DishTag, dish_tag_links
 from app.models.dish_order import ORDER_TRANSITIONS, DishOrder, DishOrderItem, OrderStatus
 from app.models.email_code import EmailCode, EmailScene
-from app.models.member import Member, MemberGender
-from app.models.post import Post, PostFavorite, PostLike, PostStatus
+from app.models.member import Member, MemberFollow, MemberGender
+from app.models.message import MemberMessage, MessageType
+from app.models.post import (
+    CommentStatus,
+    Post,
+    PostComment,
+    PostFavorite,
+    PostLike,
+    PostStatus,
+)
 from app.models.site_setting import (
     DEFAULT_ABOUT_PASSWORD,
     DEFAULT_WELCOME_BLESSING,
@@ -51,10 +59,15 @@ __all__ = [
     "EmailCode",
     "EmailScene",
     "Member",
+    "MemberFollow",
     "MemberGender",
+    "MemberMessage",
+    "MessageType",
     "Post",
+    "PostComment",
     "PostFavorite",
     "PostLike",
+    "CommentStatus",
     "PostStatus",
     "SiteSetting",
     "DEFAULT_WELCOME_TITLE",

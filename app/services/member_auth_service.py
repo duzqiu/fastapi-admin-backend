@@ -58,9 +58,9 @@ class MemberAuthService:
         return f"{prefix}_{secrets.randbelow(9000) + 1000}"
 
     def _generate_member_no(self) -> str:
-        """生成一个未被占用的 6 位随机会员编号。
+        """生成一个未被占用的 10 位随机会员编号（老用户的 6 位编号保持原样）。
 
-        900000 的编号空间下顺序重试基本不会发生第二次；数据库层面还有唯一索引兜底，
+        90 亿的编号空间下顺序重试基本不会发生第二次；数据库层面还有唯一索引兜底，
         即使极端并发下撞号，也不会写入重复编号。
         """
         for _ in range(self.MEMBER_NO_MAX_ATTEMPTS):
@@ -107,7 +107,7 @@ class MemberAuthService:
     def register(self, payload: MemberRegister, request_ip: str = "") -> Member:
         """邮箱验证码注册。
 
-        注册成功时会随机生成一个 6 位、全局不重复的会员编号（`member_no`）。
+        注册成功时会随机生成一个 10 位、全局不重复的会员编号（`member_no`）。
         """
         email = str(payload.email).lower()
 

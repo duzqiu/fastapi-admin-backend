@@ -7,12 +7,17 @@
 
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import Column, String, text
+from sqlalchemy.dialects import mysql, postgresql
 from sqlalchemy.orm import sessionmaker
 
 import app.db.init_db as init_db_module
 from app.db.base import Base
-from app.db.schema_sync import sync_missing_columns
+from app.db.schema_sync import (
+    _widen_column_sql,
+    sync_column_types,
+    sync_missing_columns,
+)
 from app.db.session import build_engine
 
 TABLE = "member_account_info"
@@ -121,3 +126,23 @@ def test_default_literal_falls_back_to_nullable_when_no_default():
     statement = _add_column_sql("t_anything", column, engine.dialect)
 
     assert "NOT NULL" not in statement
+
+def test_widen_column_sql_per_database():
+    """PG / MySQL 的「放宽列长度」DDL 语法正确。"""
+    column = Column("member_no", String(10), nullable=False)
+
+    assert _widen_column_sql("member_account_info", column, postgresql.dialect()) == (
+        "ALTER TABLE member_account_info ALTER COLUMN member_no TYPE VARCHAR(10)"
+    )
+    assert _widen_column_sql("member_account_info", column, mysql.dialect()) == (
+        "ALTER TABLE member_account_info MODIFY COLUMN member_no VARCHAR(10) NOT NULL"
+    )
+
+
+def test_sync_column_types_is_noop_on_sqlite(tmp_path):
+    """SQLite 的 VARCHAR(n) 不强制长度，直接跳过、不产生 DDL。"""
+    engine = build_engine(f"sqlite:///{(tmp_path / 'types.db').as_posix()}")
+    Base.metadata.create_all(engine)
+
+    assert sync_column_types(engine) == []
+

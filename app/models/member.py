@@ -13,7 +13,16 @@ import enum
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, DateTime, Index, Integer, String
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -38,11 +47,12 @@ class Member(PKMixin, TimestampMixin, Base):
 
     # ---------- 注册与登录 ----------
     member_no: Mapped[str] = mapped_column(
-        String(6),
+        String(10),
         unique=True,
         index=True,
         nullable=False,
-        comment="会员编号（注册时随机生成的 6 位唯一 ID）",
+        # 新注册是 10 位；历史数据仍是 6 位，保持原样不再改写
+        comment="会员编号（注册时随机生成的 10 位唯一 ID）",
     )
     email: Mapped[str] = mapped_column(
         String(120), unique=True, index=True, nullable=False, comment="注册邮箱（登录账号）"
@@ -93,3 +103,40 @@ class Member(PKMixin, TimestampMixin, Base):
 
     def __repr__(self) -> str:  # pragma: no cover - 调试用
         return f"<Member id={self.id} email={self.email!r}>"
+
+
+class MemberFollow(PKMixin, TimestampMixin, Base):
+    """会员之间的关注关系：`关注者 × 被关注者`。
+
+    表名：`member_account_follow`
+    同一对会员只会有一条记录（重复关注幂等）；不能关注自己（服务层拦截）。
+    """
+
+    __tablename__ = "member_account_follow"
+    __table_args__ = (
+        UniqueConstraint(
+            "follower_id",
+            "following_id",
+            name="uq_member_account_follow_follower_following",
+        ),
+        Index("ix_member_account_follow_follower_created", "follower_id", "created_at"),
+        Index(
+            "ix_member_account_follow_following_created", "following_id", "created_at"
+        ),
+    )
+
+    follower_id: Mapped[int] = mapped_column(
+        ForeignKey("member_account_info.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="关注发起人（会员）",
+    )
+    following_id: Mapped[int] = mapped_column(
+        ForeignKey("member_account_info.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="被关注的人（会员）",
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - 调试用
+        return f"<MemberFollow {self.follower_id}->{self.following_id}>"

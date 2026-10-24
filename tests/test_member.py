@@ -92,8 +92,8 @@ def test_register_and_duplicate(client):
     assert member["email_verified"] is True
     assert member["gender"] == "unknown"
     assert member["is_active"] is True
-    # 注册成功会生成 6 位数字会员编号
-    assert re.fullmatch(r"\d{6}", member["member_no"]), member["member_no"]
+    # 注册成功会生成 10 位数字会员编号
+    assert re.fullmatch(r"\d{10}", member["member_no"]), member["member_no"]
 
     # 重复注册 -> 409
     code = client.post(
@@ -104,11 +104,11 @@ def test_register_and_duplicate(client):
 
 
 def test_register_generates_unique_member_no(client, auth_headers):
-    """注册生成的 6 位会员编号随机且不重复，并能被后台按编号检索。"""
+    """注册生成的 10 位会员编号随机且不重复，并能被后台按编号检索。"""
     numbers = []
     for index in range(4):
         member = _register(client, f"memberno{index:02d}@example.com")
-        assert re.fullmatch(r"\d{6}", member["member_no"]), member["member_no"]
+        assert re.fullmatch(r"\d{10}", member["member_no"]), member["member_no"]
         numbers.append(member["member_no"])
 
     assert len(set(numbers)) == len(numbers), f"会员编号不能重复: {numbers}"
@@ -120,10 +120,10 @@ def test_register_generates_unique_member_no(client, auth_headers):
     assert listed["total"] == 1
     assert listed["items"][0]["member_no"] == numbers[0]
 
-    # 编号是 6 位纯数字，且不会超过长度上限
+    # 编号是 10 位纯数字，且不会超过长度上限
     from app.core.utils import generate_member_no
 
-    assert all(len(generate_member_no()) == 6 for _ in range(200))
+    assert all(len(generate_member_no()) == 10 for _ in range(200))
 
 
 def test_register_password_mismatch(client):

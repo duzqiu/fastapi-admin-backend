@@ -8,7 +8,8 @@
    （见 app/db/schema_sync.py）—— 于是「拉代码 → 重建镜像 → 起服务」即可，
    不需要任何人手工执行迁移命令。
 
-只加列能覆盖绝大多数「加字段」的迭代；改类型 / 删列 / 加约束这类变更仍要走
+只加列能覆盖绝大多数「加字段」的迭代；字符串列**放宽长度**也会自动处理
+（`sync_column_types`，只放宽不放窄）；改类型 / 删列 / 加约束这类变更仍要走
 Alembic（`python -m alembic upgrade head`，见 README 第十一节）。
 """
 
@@ -24,7 +25,7 @@ from app.core.security import hash_password
 from app.core.site_password import hash_site_password
 from app.core.utils import generate_member_no, utcnow
 from app.db.base import Base
-from app.db.schema_sync import sync_missing_columns
+from app.db.schema_sync import sync_column_types, sync_missing_columns
 from app.db.session import SessionLocal, engine
 from app.models import (  # noqa: F401  确保模型已注册
     Countdown,
@@ -325,6 +326,9 @@ def init_db() -> None:
         # 老库兜底：模型里新增、库里还没有的列，在这里补上（只加列）。
         # 有它，「拉代码 → 重建镜像 → 起服务」就够了，不必手工跑迁移。
         sync_missing_columns(engine)
+        # 老库兜底：字符串列长度不够时自动放宽（例如会员编号 6 -> 10 位）。
+        # 只放宽不放窄，老用户的 6 位编号原样保留。
+        sync_column_types(engine)
         db = SessionLocal()
         try:
             create_initial_superuser(db)

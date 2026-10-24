@@ -8,12 +8,13 @@
 
 **边界（有意为止，别越界）**：
 - 只 `ADD COLUMN`：各数据库都支持、对已有数据无破坏；已存在的列原样不动；
-- **不改类型、不删列、不动索引与约束、不做数据回填** —— 这些复杂度高、风险大，
-  仍然必须走 Alembic（见 README 第十一节）；
+- 字符串列**只放宽长度**（`sync_column_types`）：库里比模型短时才 `ALTER ... TYPE`，
+  只放宽不放窄、不改别的类型、不删列、不动索引与约束、不做数据回填；
+  其它类型变更仍然必须走 Alembic（见 README 第十一节）；
 - NOT NULL 的新列靠列上的 Python 默认值（`default=`）或类型推断出一个字面量默认值填旧行；
   实在找不到就退化成可空列并打警告，宁可少一个约束，也不让服务起不来。
 
-同步结果会写日志，可在 `docker compose logs backend` 里确认到底补了哪些列。
+同步结果会写日志，可在 `docker compose logs backend` 里确认到底补了哪些列、放宽了哪些长度。
 """
 
 from typing import List, Optional
@@ -29,6 +30,7 @@ from sqlalchemy import (
     String,
     Time,
     inspect,
+    text,
 )
 from sqlalchemy.engine import Dialect, Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -138,4 +140,87 @@ def sync_missing_columns(bind: Optional[Engine] = None) -> List[str]:
     return added
 
 
-__all__ = ["sync_missing_columns"]
+def _current_length(engine: Engine, table_name: str, column_name: str) -> Optional[int]:
+    """查库里某个字符串列的当前长度上限（MySQL / PostgreSQL 都走 information_schema）。"""
+    query = (
+        "SELECT character_maximum_length FROM information_schema.columns "
+        "WHERE table_name = :table AND column_name = :column"
+    )
+    params = {"table": table_name, "column": column_name}
+    if engine.dialect.name == "postgresql":
+        # PG 里同名表可能分布在多个 schema，只看当前 schema
+        query += " AND table_schema = current_schema()"
+
+    with engine.connect() as connection:
+        row = connection.execute(text(query), params).first()
+    if row is None or row[0] is None:
+        return None
+    return int(row[0])
+
+
+def _widen_column_sql(table_name: str, column, dialect: Dialect) -> str:
+    """拼一条「放宽字符串列长度」的 DDL。"""
+    type_sql = column.type.compile(dialect=dialect)
+    if dialect.name == "postgresql":
+        return f"ALTER TABLE {table_name} ALTER COLUMN {column.name} TYPE {type_sql}"
+    if dialect.name == "mysql":
+        null_sql = "NOT NULL" if not column.nullable else "NULL"
+        return (
+            f"ALTER TABLE {table_name} MODIFY COLUMN {column.name} {type_sql} {null_sql}"
+        )
+    return ""
+
+
+def sync_column_types(bind: Optional[Engine] = None) -> List[str]:
+    """把长度不够的字符串列放宽到 ORM 里定义的长度，返回处理过的列。
+
+    只处理「库里比模型短」的情况（例如会员编号 6 → 10 位）：
+
+    - 只放宽、不放窄，已有数据原样保留，老用户的 6 位编号不会被动；
+    - 只动 `String(n)` 这一种情况，别的类型变更请走 Alembic；
+    - SQLite 跳过：它的 `VARCHAR(n)` 不强制长度，改了也没意义；
+    - 每条 DDL 单独提交，失败只警告不打断启动（并发启动时另一个进程可能已改过）。
+    """
+    engine = bind if bind is not None else default_engine
+    dialect = engine.dialect
+    if dialect.name == "sqlite":
+        return []
+
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    widened: List[str] = []
+
+    for table in Base.metadata.sorted_tables:
+        if table.name not in existing_tables:
+            continue
+        present = {column["name"] for column in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name not in present:
+                continue
+            if not isinstance(column.type, String) or column.type.length is None:
+                continue
+
+            current = _current_length(engine, table.name, column.name)
+            if current is None or current >= column.type.length:
+                continue
+
+            statement = _widen_column_sql(table.name, column, dialect)
+            if not statement:
+                continue
+            try:
+                with engine.begin() as connection:
+                    connection.exec_driver_sql(statement)
+            except SQLAlchemyError as error:
+                logger.warning("放宽列长度失败：%s -> %s", statement, error)
+                continue
+
+            widened.append(f"{table.name}.{column.name}({current}->{column.type.length})")
+
+    if widened:
+        logger.info(
+            "数据库已自动放宽 %d 个字符串列的长度：%s", len(widened), "、".join(widened)
+        )
+    return widened
+
+
+__all__ = ["sync_missing_columns", "sync_column_types"]

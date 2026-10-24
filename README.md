@@ -36,7 +36,7 @@
 | 能力 | 说明 |
 | --- | --- |
 | 后台账号认证鉴权 | 账号密码登录、JWT（access + refresh）、角色权限（admin / editor / user） |
-| 用户中心（会员） | 邮箱验证码注册（自动分配 6 位唯一会员编号）、登录、忘记密码、个人资料（昵称/头像/背景图/性别/生日/简介）、头像与背景图上传 |
+| 用户中心（会员） | 邮箱验证码注册（自动分配 10 位唯一会员编号）、登录、忘记密码、个人资料（昵称/头像/背景图/性别/生日/简介）、头像与背景图上传 |
 | 点菜菜单与订单 | 菜品（菜名/图片/价格/库存）、**多套餐与售卖规则**（起购 / 限购 / 每日限量 / 供应时段）、分类与标签、**销量统计**、下单与订单管理闭环 |
 | 通用后台 CRUD | 后台用户管理、**会员管理**（查看 / 修改 / 启禁用 / 重置密码 / 删除）、菜品管理、订单管理 |
 | 分层基础设施 | 统一配置、统一异常、统一分页、请求日志、跨域、邮件、文件上传、初始化与迁移脚本 |
@@ -124,18 +124,18 @@ fastapi-admin-backend/
 │   │   ├── mailer.py                   邮件发送（SMTP / 未启用时只打日志），验证码邮件模板
 │   │   ├── storage.py                  通用图片上传：后缀/大小/魔术字节校验、落盘、旧文件清理
 │   │   ├── logging.py                  日志格式与初始化
-│   │   └── utils.py                    通用工具（UTC 时间戳、本地时间、供应时段判定、6 位随机编号）
+│   │   └── utils.py                    通用工具（UTC 时间戳、本地时间、供应时段判定、10 位随机编号）
 │   │
 │   ├── db/                             ★ 数据访问基础设施
 │   │   ├── base.py                     SQLAlchemy DeclarativeBase
 │   │   ├── session.py                  引擎构建（自动适配 SQLite/PG/MySQL）、会话工厂、get_db
-│   │   ├── schema_sync.py              ★ 启动时自动补齐「模型有、库里没有」的列（只加列）
+│   │   ├── schema_sync.py              ★ 启动时自动补齐「模型有、库里没有」的列，并自动放宽长度不足的字符串列
 │   │   └── init_db.py                  建表 + 自动补列 + 初始管理员 + 演示会员/菜品数据（幂等）
 │   │
 │   ├── models/                         ★ ORM 模型层
 │   │   ├── mixins.py                   主键 / 时间戳 Mixin
 │   │   ├── user.py                     后台账号表 system_auth_admin_user + UserRole 枚举
-│   │   ├── member.py                   注册用户表 member_account_info（含 6 位唯一编号）+ MemberGender
+│   │   ├── member.py                   注册用户表 member_account_info（含 10 位唯一编号）+ MemberGender
 │   │   ├── email_code.py               邮箱验证码表 + EmailScene 枚举（场景）
 │   │   ├── dish.py                     菜品域：分类 / 标签 / 菜品 / 套餐规格（含售卖规则）
 │   │   ├── dish_order.py               订单域：订单、订单明细、状态流转规则
@@ -421,7 +421,7 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
 | POST | `/member/auth/send-code` | 发送邮箱验证码（`scene=register` / `reset_password`） | 公开 |
-| POST | `/member/auth/register` | 邮箱验证码注册（入参 `email` `code` `password` `confirm_password`），成功即完成邮箱验证，并**随机生成 6 位唯一会员编号**、自动生成默认昵称与默认头像 | 公开 |
+| POST | `/member/auth/register` | 邮箱验证码注册（入参 `email` `code` `password` `confirm_password`），成功即完成邮箱验证，并**随机生成 10 位唯一会员编号**、自动生成默认昵称与默认头像 | 公开 |
 | POST | `/member/auth/login` | 邮箱 + 密码登录，返回 `scope=member` 令牌 | 公开 |
 | POST | `/member/auth/token` | OAuth2 表单登录（Swagger 调试用） | 公开 |
 | POST | `/member/auth/refresh` | 刷新会员令牌 | 公开 |
@@ -510,7 +510,7 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 | 登录账号 | 用户名 | 邮箱 |
 | 权限 | admin / editor / user | 无后台权限，仅能操作自己的资料 |
 | 令牌 `scope` | `staff` | `member` |
-| 头衔/资料 | 昵称、角色、启用状态 | 6 位会员编号、昵称、头像、背景图、性别、生日、手机号、简介、地区 |
+| 头衔/资料 | 昵称、角色、启用状态 | 10 位会员编号、昵称、头像、背景图、性别、生日、手机号、简介、地区 |
 
 **令牌隔离**：两个作用域的 JWT 互不通用。会员令牌访问 `/users`、`/members` 等后台接口会直接返回 401
 （错误码 40104「令牌使用范围不正确」），后台令牌访问 `/member/**` 同样被拒绝。
@@ -522,7 +522,7 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
    前端  ──POST /member/auth/send-code {email, scene:"register"}──▶  校验邮箱未被注册 → 生成 6 位码 → 发信
    前端  ──POST /member/auth/register  {email, code, password, confirm_password}──▶
                                       校验两次密码一致 → 校验验证码 → 创建会员（email_verified=true）
-                                                                  └ 随机生成 6 位唯一会员编号（member_no）
+                                                                  └ 随机生成 10 位唯一会员编号（member_no）
                                                                   └ 自动生成默认昵称 + 写入默认头像
 
 ② 登录
@@ -547,18 +547,18 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 
 **会员编号（`member_no`）**
 
-注册成功时自动分配一个 **6 位纯数字**的会员编号，作为对外展示的短 ID（`member_account_info.id` 那种自增主键
+注册成功时自动分配一个 **10 位纯数字**的会员编号，作为对外展示的短 ID（`member_account_info.id` 那种自增主键
 不适合直接给用户看，也不适合作为业务标识）。规则：
 
 | 项 | 说明 |
 | --- | --- |
-| 长度与范围 | 固定 6 位、首位不为 0，取值区间 `100000-999999`（900000 种） |
+| 长度与范围 | 固定 10 位、首位不为 0，取值区间 `1000000000-9999999999`（90 亿种）；早期注册的老用户仍是 6 位，不做回溯 |
 | 生成方式 | `secrets.randbelow`（`app/core/utils.generate_member_no`），非伪随机 |
 | 唯一性 | 生成时先查重、重试最多 10 次；`member_account_info.member_no` 上还有**唯一索引**兜底，绝不重复 |
 | 可检索 | 后台 `GET /members?keyword=<编号>` 可按编号精确查找 |
 | 不可修改 | 由系统生成，资料编辑接口（会员端 / 后台）都不接受该字段 |
 
-> 为什么不用主键 `id` 充当 6 位 ID：`dish_order_info.member_id` 等外键依赖自增主键，
+> 为什么不用主键 `id` 充当 10 位 ID：`dish_order_info.member_id` 等外键依赖自增主键，
 > 改成随机会丢掉有序性、破坏外键语义，且写入时需要处理冲突。新增独立的业务编号是更稳妥的做法。
 
 ### 8.3 邮箱验证码机制
@@ -1016,7 +1016,7 @@ ALTER TABLE dish_base_tag ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1; --
 # 1) 先加一个带默认值的普通列（SQLite 的 ADD COLUMN 不支持直接加 UNIQUE）
 ALTER TABLE member_account_info ADD COLUMN member_no VARCHAR(6) NOT NULL DEFAULT ''
 
-# 2) 逐行回填：用应用里的生成函数，保证 6 位且互不重复
+# 2) 逐行回填：用应用里的生成函数，保证 10 位且互不重复
 from app.core.utils import generate_member_no
 taken = set()
 for row_id, current in 查询所有 (id, member_no):
@@ -1084,7 +1084,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ix_member_account_info_member_no
 | `tests/test_api.py` | 健康检查、后台登录成功/失败、令牌校验、后台用户增删改查 |
 | `tests/test_storage.py` | 图片魔术字节识别（含 **HEIC / HEIF**）、HEIC → JPEG 转码（产物必须是真 JPEG）、坏文件要报业务错误 |
 | `tests/test_schema_sync.py` | 启动时自动补列：老库缺列能被补上且**旧数据不丢**、缺多列、结构已一致时不出 DDL（幂等）、空库跳过、NOT NULL 列造不出默认值时退化成可空列 |
-| `tests/test_member.py` | 验证码场景校验与冷却、注册（重复/错误码/弱密码）、**6 位会员编号（格式 / 唯一性 / 后台检索）**、会员登录与刷新、令牌作用域隔离、资料修改（**昵称 / 简介 / 性别 / 生日 / 地区一次改完，未传字段保持原值**；含**地区**字段）、**后台改同样字段**、**列表项带出可编辑字段（编辑保存不丢简介/手机号）**、**头像按会员 ID 分目录存放、并由资料接口 avatar_url 带出**（含未上传时回退默认头像）、头像上传（含非法文件）、**后台代传头像与按 ID 读取**、**背景图按会员 ID 分目录存放、由 background_url 带出（含覆盖上传只留一张、后台代传与按 ID 读取）**、**后台编辑地区字段**、修改密码、验证码重置密码、后台会员管理全流程 |
+| `tests/test_member.py` | 验证码场景校验与冷却、注册（重复/错误码/弱密码）、**10 位会员编号（格式 / 唯一性 / 后台检索）**、会员登录与刷新、令牌作用域隔离、资料修改（**昵称 / 简介 / 性别 / 生日 / 地区一次改完，未传字段保持原值**；含**地区**字段）、**后台改同样字段**、**列表项带出可编辑字段（编辑保存不丢简介/手机号）**、**头像按会员 ID 分目录存放、并由资料接口 avatar_url 带出**（含未上传时回退默认头像）、头像上传（含非法文件）、**后台代传头像与按 ID 读取**、**背景图按会员 ID 分目录存放、由 background_url 带出（含覆盖上传只留一张、后台代传与按 ID 读取）**、**后台编辑地区字段**、修改密码、验证码重置密码、后台会员管理全流程 |
 | `tests/test_dish.py` | 分类/标签 CRUD、标签启用状态（`only_active` 过滤与 C 端隐藏）、菜品与套餐增删改、图片上传、点菜菜单浏览、下单（无套餐/有套餐）、库存与销量联动、起购/限购/每日限量/供应时段校验、取消订单回滚、后台订单状态流转、会员与管理员权限隔离 |
 
 ---

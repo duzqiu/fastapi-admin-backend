@@ -7,7 +7,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.utils import utcnow
-from app.models.member import Member
+from app.models.member import Member, MemberFollow
 from app.repositories.base import BaseRepository
 
 
@@ -90,3 +90,68 @@ class MemberRepository(BaseRepository[Member]):
     def recent(self, limit: int = 5) -> List[Member]:
         stmt = select(Member).order_by(Member.created_at.desc()).limit(limit)
         return list(self.db.execute(stmt).scalars().all())
+
+
+class MemberFollowRepository(BaseRepository[MemberFollow]):
+    """会员关注关系的数据访问对象（`关注者 × 被关注者`）。"""
+
+    def __init__(self, db: Session) -> None:
+        super().__init__(MemberFollow, db)
+
+    def find(self, follower_id: int, following_id: int) -> Optional[MemberFollow]:
+        """关注记录；没关注返回 None。"""
+        return self.get_by(follower_id=follower_id, following_id=following_id)
+
+    def is_following(self, follower_id: Optional[int], following_id: Optional[int]) -> bool:
+        """`follower_id` 是否关注了 `following_id`。"""
+        if not follower_id or not following_id:
+            return False
+        return self.exists(follower_id=follower_id, following_id=following_id)
+
+    def following_ids(self, follower_id: Optional[int]) -> set[int]:
+        """该会员关注的所有人 ID（批量标 `is_following` 用）。"""
+        if not follower_id:
+            return set()
+        stmt = select(MemberFollow.following_id).where(
+            MemberFollow.follower_id == follower_id
+        )
+        return set(self.db.execute(stmt).scalars().all())
+
+    def list_following_members(
+        self, follower_id: int, *, offset: int = 0, limit: int = 10
+    ) -> Tuple[List[Member], int]:
+        """该会员关注的用户（最近关注的在前，只出启用的账号）。"""
+        conditions = [
+            MemberFollow.follower_id == follower_id,
+            Member.is_active.is_(True),
+        ]
+        count_stmt = (
+            select(func.count())
+            .select_from(MemberFollow)
+            .join(Member, Member.id == MemberFollow.following_id)
+            .where(*conditions)
+        )
+        stmt = (
+            select(Member)
+            .join(MemberFollow, MemberFollow.following_id == Member.id)
+            .where(*conditions)
+            .order_by(MemberFollow.created_at.desc(), MemberFollow.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        total = int(self.db.execute(count_stmt).scalar_one())
+        items = list(self.db.execute(stmt).scalars().unique().all())
+        return items, total
+
+    def count_following(self, follower_id: int) -> int:
+        """该会员关注了多少人（只算启用账号）。"""
+        stmt = (
+            select(func.count())
+            .select_from(MemberFollow)
+            .join(Member, Member.id == MemberFollow.following_id)
+            .where(
+                MemberFollow.follower_id == follower_id,
+                Member.is_active.is_(True),
+            )
+        )
+        return int(self.db.execute(stmt).scalar_one())

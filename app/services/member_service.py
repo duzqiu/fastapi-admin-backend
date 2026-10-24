@@ -20,12 +20,14 @@ from app.core.member_media import (
     resolve_avatar_url,
     resolve_background_url,
 )
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import BusinessError, NotFoundError
 from app.core.logging import logger
 from app.core.security import hash_password
 from app.core.storage import remove_upload, save_image
 from app.models.member import Member, MemberGender
-from app.repositories.member_repository import MemberRepository
+from app.models.message import MessageType
+from app.repositories.member_repository import MemberFollowRepository, MemberRepository
+from app.services.message_service import MessageService
 from app.schemas.member import MemberAdminUpdate, MemberProfileUpdate
 
 
@@ -35,6 +37,8 @@ class MemberService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.members = MemberRepository(db)
+        self.follows = MemberFollowRepository(db)
+        self.message_service = MessageService(db)
 
     # ------------------------- 查询 -------------------------
     def get_or_404(self, member_id: int) -> Member:
@@ -42,6 +46,63 @@ class MemberService:
         if member is None:
             raise NotFoundError(f"会员不存在: id={member_id}")
         return member
+
+    # ------------------------- 关注 -------------------------
+    def follow(self, follower: Member, target_id: int) -> None:
+        """关注某个会员（幂等）：已关注再点一次不报错、也不会多出记录。"""
+        if follower.id == target_id:
+            raise BusinessError("不能关注自己")
+        target = self.get_or_404(target_id)
+        if not target.is_active:
+            raise NotFoundError(f"会员不存在: id={target_id}")
+
+        if self.follows.find(follower.id, target_id) is None:
+            self.follows.create(follower_id=follower.id, following_id=target_id)
+            self.db.commit()
+            # 通知被关注的人（旁路：失败不影响关注本身）
+            try:
+                self.message_service.push(
+                    recipient_id=target_id,
+                    msg_type=MessageType.FOLLOW,
+                    title=f"{follower.display_name} 关注了你",
+                    from_member_id=follower.id,
+                    from_nickname=follower.display_name,
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning("写入关注通知失败", exc_info=True)
+
+    def unfollow(self, follower: Member, target_id: int) -> None:
+        """取消关注（幂等）：本来没关注也返回成功。"""
+        record = self.follows.find(follower.id, target_id)
+        if record is not None:
+            self.follows.delete(record)
+            self.db.commit()
+
+    def is_following(self, follower_id: Optional[int], target_id: Optional[int]) -> bool:
+        """`follower_id` 是否关注了 `target_id`（未登录恒为 False）。"""
+        return self.follows.is_following(follower_id, target_id)
+
+    def following_ids(self, member_id: Optional[int]) -> set[int]:
+        """该会员关注的所有人 ID。"""
+        return self.follows.following_ids(member_id)
+
+    def list_following(
+        self,
+        member_id: int,
+        *,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> Tuple[List[Member], int]:
+        """该会员关注的用户列表（最近关注的在前）。"""
+        return self.follows.list_following_members(
+            member_id,
+            offset=(page - 1) * page_size,
+            limit=page_size,
+        )
+
+    def count_following(self, member_id: int) -> int:
+        """该会员关注了多少人。"""
+        return self.follows.count_following(member_id)
 
     def list_members(
         self,

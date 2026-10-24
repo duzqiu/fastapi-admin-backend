@@ -11,16 +11,21 @@ from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessError, ForbiddenError, NotFoundError
+from app.core.logging import logger
 from app.core.storage import save_image
 from app.core.utils import generate_post_no, utcnow
 from app.models.member import Member
-from app.models.post import Post, PostStatus
+from app.models.message import MessageType
+from app.models.post import CommentStatus, Post, PostComment, PostStatus
+from app.repositories.member_repository import MemberFollowRepository
+from app.services.message_service import MessageService
 from app.repositories.post_repository import (
+    PostCommentRepository,
     PostFavoriteRepository,
     PostLikeRepository,
     PostRepository,
 )
-from app.schemas.post import PostCreate, PostUpdate
+from app.schemas.post import PostCommentCreate, PostCreate, PostUpdate
 
 # 审核状态的中文文案（报错信息里用，避免再引一次 schema）
 _STATUS_TEXT = {
@@ -52,6 +57,41 @@ class PostService:
         self.posts = PostRepository(db)
         self.favorites = PostFavoriteRepository(db)
         self.likes = PostLikeRepository(db)
+        self.comments = PostCommentRepository(db)
+        self.follows = MemberFollowRepository(db)
+        self.message_service = MessageService(db)
+
+    def _push_message(
+        self,
+        recipient_id: Optional[int],
+        msg_type: str,
+        title: str,
+        content: str = "",
+        *,
+        post_id: Optional[int] = None,
+        actor: Optional[Member] = None,
+        from_member_id: Optional[int] = None,
+        from_nickname: str = "",
+    ) -> None:
+        """写站内通知的旁路：任何异常都不影响点赞 / 评论 / 审核主流程。"""
+        try:
+            self.message_service.push(
+                recipient_id=recipient_id,
+                msg_type=msg_type,
+                title=title,
+                content=content,
+                post_id=post_id,
+                from_member_id=(
+                    from_member_id
+                    if from_member_id is not None
+                    else (actor.id if actor else None)
+                ),
+                from_nickname=(
+                    from_nickname or (actor.display_name if actor else "")
+                ),
+            )
+        except Exception:  # noqa: BLE001 - 通知失败不该影响业务
+            logger.warning("写入站内消息失败: type=%s", msg_type, exc_info=True)
 
     def _mark_interactions(self, posts: List[Post], member: Optional[Member]) -> None:
         """给帖子标上「是否已点赞 / 收藏」和「被点赞 / 收藏次数」。
@@ -64,6 +104,8 @@ class PostService:
         ids = [post.id for post in posts if post.id]
         like_counts = self.likes.counts_for(ids)
         favorite_counts = self.favorites.counts_for(ids)
+        # 评论数只算「已通过」的（前台看到的条数）
+        comment_counts = self.comments.counts_for(ids)
         liked = (
             self.likes.liked_post_ids(member.id, ids)
             if member is not None and ids
@@ -74,11 +116,15 @@ class PostService:
             if member is not None and ids
             else set()
         )
+        followed = self.follows.following_ids(member.id) if member is not None else set()
         for post in posts:
             post.like_count = like_counts.get(post.id, 0)
             post.is_liked = post.id in liked
             post.favorite_count = favorite_counts.get(post.id, 0)
             post.is_favorited = post.id in favorited
+            post.comment_count = comment_counts.get(post.id, 0)
+            # 匿名帖没有作者，恒为未关注
+            post.is_following = bool(post.member_id) and post.member_id in followed
 
     def _generate_post_no(self) -> str:
         """生成一个未被占用的 12 位随机帖子编号。
@@ -131,6 +177,34 @@ class PostService:
         `viewer` 只是用来标「我有没有收藏过」，不影响返回哪些帖子。
         """
         items, total = self.posts.list_published(
+            offset=(page - 1) * page_size,
+            limit=page_size,
+        )
+        self._mark_interactions(items, viewer)
+        return items, total
+
+    def get_public_post(
+        self, post_id: int, *, viewer: Optional[Member] = None
+    ) -> Post:
+        """公开的帖子详情（App 从消息点进来用）：只出已通过的。"""
+        post = self.get_or_404(post_id)
+        if post.status != PostStatus.APPROVED.value:
+            raise NotFoundError(f"帖子不存在: id={post_id}")
+        self._mark_interactions([post], viewer)
+        return post
+
+    def list_following_posts(
+        self,
+        member_id: int,
+        *,
+        page: int = 1,
+        page_size: int = 10,
+        viewer: Optional[Member] = None,
+    ) -> Tuple[List[Post], int]:
+        """「关注」页：我关注的人发布的已通过帖子，按发布时间倒序。"""
+        author_ids = sorted(self.follows.following_ids(member_id))
+        items, total = self.posts.list_published_by_authors(
+            author_ids,
             offset=(page - 1) * page_size,
             limit=page_size,
         )
@@ -257,6 +331,16 @@ class PostService:
         if self.likes.find(member.id, post.id) is None:
             self.likes.create(member_id=member.id, post_id=post.id)
             self.db.commit()
+            # 首次点赞才通知作者；自己赞自己不打扰
+            if post.member_id and post.member_id != member.id:
+                self._push_message(
+                    post.member_id,
+                    MessageType.LIKE,
+                    f"{member.display_name} 赞了你的帖子",
+                    post.title,
+                    post_id=post.id,
+                    actor=member,
+                )
 
         post.is_liked = True
         post.like_count = self.likes.count_for(post.id)
@@ -318,6 +402,132 @@ class PostService:
         self._mark_interactions(items, viewer)
         return items, total
 
+    # ------------------------- 评论 -------------------------
+    def get_comment_or_404(self, comment_id: int) -> PostComment:
+        item = self.comments.get(comment_id)
+        if item is None:
+            raise NotFoundError(f"评论不存在: id={comment_id}")
+        return item
+
+    def create_comment(
+        self, post_id: int, payload: PostCommentCreate, member: Member
+    ) -> PostComment:
+        """发表评论：默认「待审核」，后台通过后前台才展示。"""
+        post = self.get_or_404(post_id)
+        if post.status != PostStatus.APPROVED.value:
+            raise BusinessError("只能在审核通过的帖子下评论")
+
+        item = self.comments.create(
+            post_id=post.id,
+            member_id=member.id,
+            publisher=member.display_name,
+            content=payload.content,
+            status=CommentStatus.PENDING.value,
+        )
+        self.db.commit()
+        self.db.refresh(item)
+        # 评论通知不在这里发：等后台审核通过、真正展示给作者时再发
+        return item
+
+    def list_comments(
+        self, post_id: int, *, page: int = 1, page_size: int = 20
+    ) -> Tuple[List[PostComment], int]:
+        """某条帖子下**已通过**的评论（前台详情页用），最新的在前。"""
+        self.get_or_404(post_id)
+        return self.comments.list_by_post(
+            post_id,
+            offset=(page - 1) * page_size,
+            limit=page_size,
+        )
+
+    def list_all_comments(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 10,
+        keyword: Optional[str] = None,
+        status: Optional[Union[str, CommentStatus]] = None,
+        post_id: Optional[int] = None,
+    ) -> Tuple[List[PostComment], int]:
+        """后台评论管理：按状态 / 帖子 / 关键字筛选。"""
+        status_value = status.value if isinstance(status, CommentStatus) else status
+        return self.comments.search(
+            keyword=keyword,
+            status=status_value,
+            post_id=post_id,
+            offset=(page - 1) * page_size,
+            limit=page_size,
+        )
+
+    def audit_comment(self, comment_id: int, status: CommentStatus) -> PostComment:
+        """审核评论：待审核 → 已通过 / 已拒绝，结果是终态。"""
+        item = self.get_comment_or_404(comment_id)
+        if item.status != CommentStatus.PENDING.value:
+            raise BusinessError("该评论已审核，结果不可更改")
+
+        item.status = status.value
+        self.db.commit()
+        self.db.refresh(item)
+
+        approved = status is CommentStatus.APPROVED
+
+        # 审核结果通知评论人
+        if item.member_id:
+            self._push_message(
+                item.member_id,
+                MessageType.COMMENT_AUDIT,
+                "评论已通过审核" if approved else "评论未通过审核",
+                item.content,
+                post_id=item.post_id,
+            )
+
+        # 通过后才通知帖子作者「有人评论了你的帖子」——
+        # 这时评论已经能在 App 里看到，通知点进去不会扑空
+        post = item.post
+        if (
+            approved
+            and post is not None
+            and post.member_id
+            and post.member_id != item.member_id
+        ):
+            self._push_message(
+                post.member_id,
+                MessageType.COMMENT,
+                f"{item.publisher or '有人'} 评论了你的帖子",
+                item.content,
+                post_id=item.post_id,
+                from_member_id=item.member_id,
+                from_nickname=item.publisher or "",
+            )
+        return item
+
+    def delete_comment(self, comment_id: int) -> None:
+        """删除评论（后台）。"""
+        item = self.get_comment_or_404(comment_id)
+        self.comments.delete(item)
+        self.db.commit()
+
+    def received_comments(self, member_id: int) -> int:
+        """某会员的被评论总数：自己所有帖子收到的已通过评论合计。"""
+        return self.comments.count_received(member_id)
+
+    def list_commented_posts(
+        self,
+        member_id: int,
+        *,
+        page: int = 1,
+        page_size: int = 10,
+        viewer: Optional[Member] = None,
+    ) -> Tuple[List[Post], int]:
+        """「被评论的帖子」列表：我发布的、收到过已通过评论的帖子，按评论数倒序。"""
+        items, total = self.comments.list_posts_with_comments(
+            member_id,
+            offset=(page - 1) * page_size,
+            limit=page_size,
+        )
+        self._mark_interactions(items, viewer)
+        return items, total
+
     # ------------------------- 写入 -------------------------
     def create_post(self, payload: PostCreate, member: Optional[Member] = None) -> Post:
         """用户发帖：无论谁发、内容如何，进来一律是「待审核」。"""
@@ -356,6 +566,18 @@ class PostService:
         self.posts.update(post, status=status.value)
         self.db.commit()
         self.db.refresh(post)
+
+        # 审核结果通知作者
+        if post.member_id:
+            self._push_message(
+                post.member_id,
+                MessageType.POST_AUDIT,
+                "帖子已通过审核"
+                if status is PostStatus.APPROVED
+                else "帖子未通过审核",
+                post.title,
+                post_id=post.id,
+            )
         return post
 
     def resubmit(self, post_id: int, payload: PostUpdate, member: Member) -> Post:
