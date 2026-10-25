@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.exceptions import BusinessError, ForbiddenError, NotFoundError
 from app.core.logging import logger
@@ -125,6 +126,8 @@ class PostService:
             post.comment_count = comment_counts.get(post.id, 0)
             # 匿名帖没有作者，恒为未关注
             post.is_following = bool(post.member_id) and post.member_id in followed
+        # 发布人昵称实时取会员当前昵称（库里 publisher 是发帖时的快照）
+        self._refresh_post_publishers(posts)
 
     def _generate_post_no(self) -> str:
         """生成一个未被占用的 12 位随机帖子编号。
@@ -144,8 +147,20 @@ class PostService:
             raise NotFoundError(f"帖子不存在: id={post_id}")
         return post
 
+    def _refresh_post_publishers(self, posts: List[Post]) -> None:
+        """发布人昵称实时取会员当前昵称（库里 publisher 是发帖时的快照）。
+
+        后台列表 / 详情也要看到新昵称，所以这里独立成一个可复用的方法；
+        用 `set_committed_value` 只改内存，不标记脏、不写库。
+        """
+        for post in posts:
+            if post.member is not None and post.member.display_name:
+                set_committed_value(post, "publisher", post.member.display_name)
+
     def get_post(self, post_id: int) -> Post:
-        return self.get_or_404(post_id)
+        post = self.get_or_404(post_id)
+        self._refresh_post_publishers([post])
+        return post
 
     def list_posts(
         self,
@@ -157,13 +172,15 @@ class PostService:
         publisher: Optional[str] = None,
     ) -> Tuple[List[Post], int]:
         status_value = status.value if isinstance(status, PostStatus) else status
-        return self.posts.search(
+        items, total = self.posts.search(
             keyword=keyword,
             status=status_value,
             publisher=publisher,
             offset=(page - 1) * page_size,
             limit=page_size,
         )
+        self._refresh_post_publishers(items)
+        return items, total
 
     def list_latest(
         self,
@@ -434,11 +451,22 @@ class PostService:
     ) -> Tuple[List[PostComment], int]:
         """某条帖子下**已通过**的评论（前台详情页用），最新的在前。"""
         self.get_or_404(post_id)
-        return self.comments.list_by_post(
+        items, total = self.comments.list_by_post(
             post_id,
             offset=(page - 1) * page_size,
             limit=page_size,
         )
+        self._refresh_comment_publishers(items)
+        return items, total
+
+    def _refresh_comment_publishers(self, items: List[PostComment]) -> None:
+        """评论人昵称实时取会员当前昵称（库里存的是发评论时的快照）。
+
+        和帖子一样用 `set_committed_value`：只改内存里的出参值，不标记脏、不写库。
+        """
+        for item in items:
+            if item.member is not None and item.member.display_name:
+                set_committed_value(item, "publisher", item.member.display_name)
 
     def list_all_comments(
         self,
@@ -451,13 +479,15 @@ class PostService:
     ) -> Tuple[List[PostComment], int]:
         """后台评论管理：按状态 / 帖子 / 关键字筛选。"""
         status_value = status.value if isinstance(status, CommentStatus) else status
-        return self.comments.search(
+        items, total = self.comments.search(
             keyword=keyword,
             status=status_value,
             post_id=post_id,
             offset=(page - 1) * page_size,
             limit=page_size,
         )
+        self._refresh_comment_publishers(items)
+        return items, total
 
     def audit_comment(self, comment_id: int, status: CommentStatus) -> PostComment:
         """审核评论：待审核 → 已通过 / 已拒绝，结果是终态。"""
@@ -578,6 +608,8 @@ class PostService:
                 post.title,
                 post_id=post.id,
             )
+        # 出参里的发布人也用最新昵称
+        self._refresh_post_publishers([post])
         return post
 
     def resubmit(self, post_id: int, payload: PostUpdate, member: Member) -> Post:

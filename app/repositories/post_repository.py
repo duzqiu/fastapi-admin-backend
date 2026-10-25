@@ -6,6 +6,7 @@ from typing import Any, List, Optional, Tuple
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
+from app.models.member import Member
 from app.models.post import (
     CommentStatus,
     Post,
@@ -47,13 +48,21 @@ class PostRepository(BaseRepository[Post]):
                     Post.post_no.like(like),
                     Post.title.like(like),
                     Post.content.like(like),
+                    # 发布人：快照 + 会员当前昵称都能搜到（改过昵称也能按新名字查）
                     Post.publisher.like(like),
+                    Post.member.has(Member.nickname.like(like)),
                 )
             )
         if status:
             conditions.append(Post.status == status)
         if publisher:
-            conditions.append(Post.publisher.like(f"%{publisher.strip()}%"))
+            like = f"%{publisher.strip()}%"
+            conditions.append(
+                or_(
+                    Post.publisher.like(like),
+                    Post.member.has(Member.nickname.like(like)),
+                )
+            )
 
         return self.list(
             conditions=conditions,
@@ -333,11 +342,12 @@ class PostCommentRepository(BaseRepository[PostComment]):
         conditions: List[Any] = []
         if keyword:
             like = f"%{keyword.strip()}%"
-            # 关键字同时匹配：评论内容 / 评论人 / 所属帖子的 12 位编号
+            # 关键字同时匹配：评论内容 / 评论人（快照 + 当前昵称）/ 帖子编号
             conditions.append(
                 or_(
                     PostComment.content.like(like),
                     PostComment.publisher.like(like),
+                    PostComment.member.has(Member.nickname.like(like)),
                     PostComment.post.has(Post.post_no.like(like)),
                 )
             )

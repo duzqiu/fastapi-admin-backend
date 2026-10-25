@@ -103,6 +103,60 @@ def heif_to_jpeg(content: bytes, max_bytes: int = 0) -> bytes:
         raise BusinessError("HEIC 图片解析失败，请换一张或先转成 JPG") from error
 
 
+def shrink_image(
+    content: bytes,
+    extension: str,
+    *,
+    max_side: int = 1600,
+    max_bytes: int = 0,
+) -> tuple[bytes, str]:
+    """把过大的图片缩到 `max_side` 以内并转 JPEG，返回 (字节, 后缀)。
+
+    目的：客户端上传的手机原图动辄 3~5MB，后面列表 / 详情都要再下载一遍，
+    压缩后体积通常降到 1/10，上传和浏览都轻。转不了（没装 Pillow、格式少见）
+    或压完反而更大时原样返回，绝不影响上传成功与否。
+    """
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:  # pragma: no cover - 依赖没装
+        return content, extension
+    if extension in ("gif", "webp"):
+        # 可能带动画：转了只剩第一帧，不碰
+        return content, extension
+
+    try:
+        with Image.open(io.BytesIO(content)) as image:
+            image = ImageOps.exif_transpose(image)
+            too_big = max(image.size) > max_side
+            too_heavy = bool(max_bytes) and len(content) > max_bytes
+            if not too_big and not too_heavy:
+                return content, extension
+
+            if image.mode not in ("RGB", "L"):
+                # 透明背景铺白：直接 convert("RGB") 会让透明区域变黑
+                if image.mode in ("RGBA", "LA", "P"):
+                    image = image.convert("RGBA")
+                    background = Image.new("RGB", image.size, (255, 255, 255))
+                    background.paste(image, mask=image.split()[-1])
+                    image = background
+                else:
+                    image = image.convert("RGB")
+
+            image.thumbnail((max_side, max_side))
+            data = b""
+            for quality in _JPEG_QUALITIES:
+                buffer = io.BytesIO()
+                image.save(buffer, format="JPEG", quality=quality, optimize=True)
+                data = buffer.getvalue()
+                if not max_bytes or len(data) <= max_bytes:
+                    break
+            if len(data) >= len(content):
+                return content, extension
+            return data, "jpg"
+    except Exception:  # noqa: BLE001 - 解不出来就原样存，别让上传失败
+        return content, extension
+
+
 def save_image(
     upload: UploadFile,
     *,
@@ -136,6 +190,19 @@ def save_image(
         content = heif_to_jpeg(content, max_bytes=max_bytes)
         extension = "jpg"
         logger.info("HEIC 已转 JPEG 落盘（%d 字节）", len(content))
+
+    # 服务端再兜一层压缩：手机原图即使客户端没压，也不会把 5MB 原片存下来
+    before = len(content)
+    content, extension = shrink_image(
+        content,
+        extension,
+        max_side=settings.IMAGE_SHRINK_MAX_SIDE,
+        max_bytes=max_bytes,
+    )
+    if len(content) != before:
+        logger.info(
+            "图片已压缩落盘：%d -> %d 字节（%s）", before, len(content), extension
+        )
 
     target_dir = settings.upload_dir / subdir
     target_dir.mkdir(parents=True, exist_ok=True)

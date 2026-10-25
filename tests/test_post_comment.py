@@ -195,3 +195,39 @@ def test_commented_posts_and_received_count(client, auth_headers):
 def test_admin_comment_requires_admin(client):
     """后台评论接口需要管理员令牌。"""
     assert client.get(COMMENTS).status_code == 401
+
+def test_comment_publisher_follows_member_nickname(client, auth_headers):
+    """评论人改昵称后，评论区显示的是新昵称（库里存的是历史快照）。"""
+    author_id, author = _register_member(client)
+    post = _approved_post(client, auth_headers, author)
+    fan_id, fan = _register_member(client)
+
+    comment = client.post(
+        f"{POSTS}/{post['id']}/comments", headers=fan, json={"content": "昵称同步"}
+    ).json()
+    client.patch(
+        f"{COMMENTS}/{comment['id']}/status",
+        headers=auth_headers,
+        json={"status": "approved"},
+    )
+
+    member_api = POSTS.replace("/posts", "/member/profile")
+    assert (
+        client.put(
+            member_api, headers=fan, json={"nickname": "评论人新昵称"}
+        ).status_code
+        == 200
+    )
+
+    listed = client.get(f"{POSTS}/{post['id']}/comments").json()["items"]
+    assert listed[0]["publisher"] == "评论人新昵称"
+
+    admin_list = client.get(COMMENTS, headers=auth_headers).json()["items"]
+    target = next(item for item in admin_list if item["id"] == comment["id"])
+    assert target["publisher"] == "评论人新昵称"
+
+    # 后台也能按新昵称搜到这条评论
+    searched = client.get(
+        COMMENTS, headers=auth_headers, params={"keyword": "评论人新昵称"}
+    ).json()
+    assert comment["id"] in [item["id"] for item in searched["items"]]

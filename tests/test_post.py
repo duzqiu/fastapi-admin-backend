@@ -891,3 +891,65 @@ def test_delete_post(client, auth_headers):
     post = create_post(client)
     assert client.delete(f"{API}/{post['id']}", headers=auth_headers).status_code == 200
     assert client.get(f"{API}/{post['id']}", headers=auth_headers).status_code == 404
+
+def test_publisher_follows_member_nickname(client, auth_headers):
+    """会员改昵称后，旧帖子的发布人昵称实时跟着变（库里存的是历史快照）。"""
+    member_id, member = _register_member(client)
+    post = client.post(API, headers=member, json={"title": "昵称同步"}).json()
+    client.patch(
+        f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
+    )
+
+    profile_api = API.replace("/posts", "/member/profile")
+    assert (
+        client.put(
+            profile_api, headers=member, json={"nickname": "改过的昵称"}
+        ).status_code
+        == 200
+    )
+
+    detail = client.get(f"{API}/detail/{post['id']}").json()
+    assert detail["publisher"] == "改过的昵称"
+
+    listed = client.get(f"{API}/latest").json()["items"]
+    item = next(entry for entry in listed if entry["id"] == post["id"])
+    assert item["publisher"] == "改过的昵称"
+
+    # 后台列表 / 详情也要显示新昵称，并且能按新昵称搜到
+    admin_items = client.get(API, headers=auth_headers).json()["items"]
+    admin_item = next(entry for entry in admin_items if entry["id"] == post["id"])
+    assert admin_item["publisher"] == "改过的昵称"
+
+    admin_detail = client.get(f"{API}/{post['id']}", headers=auth_headers).json()
+    assert admin_detail["publisher"] == "改过的昵称"
+
+    searched = client.get(
+        API, headers=auth_headers, params={"keyword": "改过的昵称"}
+    ).json()
+    assert post["id"] in [entry["id"] for entry in searched["items"]]
+
+def test_upload_large_image_is_shrunk(client):
+    """大图落盘前压缩：长边压到 1600 内、转 JPEG、体积明显变小。"""
+    import io
+
+    import pytest
+
+    pytest.importorskip("PIL")
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (3200, 2000), (180, 40, 40)).save(buffer, format="PNG")
+    raw = buffer.getvalue()
+
+    response = client.post(
+        f"{API}/images", files={"file": ("big.png", raw, "image/png")}
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["filename"].endswith(".jpg")
+    assert body["size"] < len(raw)
+
+    saved = client.get(body["url"])
+    assert saved.status_code == 200
+    with Image.open(io.BytesIO(saved.content)) as image:
+        assert max(image.size) <= 1600
