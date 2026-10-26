@@ -57,18 +57,28 @@ class MessageService:
 
     # ------------------------- 查询 -------------------------
     def list_messages(
-        self, member_id: int, *, page: int = 1, page_size: int = 20
+        self,
+        member_id: int,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+        message_type: Optional[str] = None,
     ) -> Tuple[List[MemberMessage], int]:
-        """某个会员的消息列表，最新的在前。"""
+        """某个会员的消息列表，可按类型筛选，最新的在前。"""
         return self.messages.list_for_member(
             member_id,
             offset=(page - 1) * page_size,
             limit=page_size,
+            message_type=message_type,
         )
 
     def unread_count(self, member_id: int) -> int:
         """未读条数。"""
         return self.messages.count_unread(member_id)
+
+    def unread_counts_by_type(self, member_id: int) -> dict[str, int]:
+        """该会员按类型分组的未读数。"""
+        return self.messages.count_unread_by_type(member_id)
 
     # ------------------------- 已读 -------------------------
     def mark_read(self, member_id: int, message_id: int) -> None:
@@ -76,7 +86,9 @@ class MessageService:
         if self.messages.mark_read(member_id, message_id):
             self.db.commit()
 
-    def mark_all_read(self, member_id: int) -> None:
-        """全部标记已读（进消息页时调用）。"""
-        if self.messages.mark_all_read(member_id):
+    def mark_all_read(
+        self, member_id: int, message_type: Optional[str] = None
+    ) -> None:
+        """标记指定类型已读；省略类型时兼容全部标记已读。"""
+        if self.messages.mark_all_read(member_id, message_type=message_type):
             self.db.commit()

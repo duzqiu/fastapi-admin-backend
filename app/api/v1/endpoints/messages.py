@@ -8,7 +8,9 @@
 消息由业务侧事件写入（点赞 / 评论 / 关注 / 审核结果），这里只负责读与标记。
 """
 
-from fastapi import APIRouter, Depends
+from typing import Literal, Optional
+
+from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import PageParams, get_current_member, get_message_service
 from app.models.member import Member
@@ -24,12 +26,16 @@ def list_messages(
     page_params: PageParams = Depends(),
     member: Member = Depends(get_current_member),
     service: MessageService = Depends(get_message_service),
+    message_type: Optional[
+        Literal["like", "follow", "comment", "post_audit", "comment_audit"]
+    ] = Query(default=None, alias="type"),
 ) -> PageResult[MemberMessageOut]:
-    """当前会员的站内消息，最新的在前。"""
+    """当前会员的站内消息，可按 type 筛选，最新的在前。"""
     items, total = service.list_messages(
         member.id,
         page=page_params.page,
         page_size=page_params.page_size,
+        message_type=message_type,
     )
     return PageResult.create(items, total, page_params.page, page_params.page_size)
 
@@ -43,8 +49,11 @@ def get_unread_count(
     member: Member = Depends(get_current_member),
     service: MessageService = Depends(get_message_service),
 ) -> UnreadCountOut:
-    """未读条数，App 用它决定底部「消息」是否显示红点。"""
-    return UnreadCountOut(unread_count=service.unread_count(member.id))
+    """返回当前会员的未读总数与各类型未读数，用于底部及分类红点。"""
+    counts_by_type = service.unread_counts_by_type(member.id)
+    return UnreadCountOut(
+        unread_count=sum(counts_by_type.values()), counts_by_type=counts_by_type
+    )
 
 
 @router.post(
@@ -53,9 +62,12 @@ def get_unread_count(
 def mark_all_read(
     member: Member = Depends(get_current_member),
     service: MessageService = Depends(get_message_service),
+    message_type: Optional[
+        Literal["like", "follow", "comment", "post_audit", "comment_audit"]
+    ] = Query(default=None, alias="type"),
 ) -> MessageResponse:
-    """进入消息页后调用：把所有未读一次性标为已读。"""
-    service.mark_all_read(member.id)
+    """把指定类型的未读标为已读；省略 type 时标记全部类型。"""
+    service.mark_all_read(member.id, message_type=message_type)
     return MessageResponse(message="已全部标记为已读")
 
 

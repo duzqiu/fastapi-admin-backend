@@ -40,3 +40,6 @@ class UnreadCountOut(BaseModel):
     """未读消息数（底部菜单红点用）。"""
 
     unread_count: int = Field(default=0, description="未读消息数")
+    counts_by_type: dict[str, int] = Field(
+        default_factory=dict, description="按消息类型统计的未读数，无未读的类型可省略"
+    )

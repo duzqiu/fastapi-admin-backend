@@ -224,6 +224,7 @@ class MemberPublicOut(ORMBaseModel):
     id: int
     member_no: str = Field(default="", description="会员编号")
     nickname: str = Field(default="", description="昵称")
+    gender: str = Field(default="unknown", description="性别：male / female / unknown（保密）")
     avatar: str = Field(default="", description="库里存的头像值（原始值）")
     bio: str = Field(default="", description="个人简介")
     region: str = Field(default="", description="地区")

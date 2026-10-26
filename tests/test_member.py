@@ -807,6 +807,29 @@ def test_public_member_profile_needs_no_login(client):
         assert key not in body
 
 
+@pytest.mark.parametrize("gender", ["male", "female", "unknown"])
+def test_public_member_profile_gender(client, gender):
+    """性别保存后可由公开主页回读，保密使用 unknown，不泄露其他隐私。"""
+    email = f"public-gender-{gender}@example.com"
+    member = _register(client, email)
+    headers = _member_headers(client, email)
+    # 先设为男，保证 unknown 用例也验证从已公开切回保密。
+    initial = client.put(f"{MEMBER_API}/profile", headers=headers, json={"gender": "male"})
+    assert initial.status_code == 200, initial.text
+    updated = client.put(f"{MEMBER_API}/profile", headers=headers, json={"gender": gender})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["gender"] == gender
+    profile = client.get(f"{MEMBER_API}/profile", headers=headers)
+    assert profile.status_code == 200, profile.text
+    assert profile.json()["gender"] == gender
+    response = client.get(f"{API}/members/{member['id']}/public")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["gender"] == gender
+    for key in ("email", "phone", "birthday", "last_login_at"):
+        assert key not in body
+
+
 def test_public_member_profile_unknown_is_404(client):
     """不存在的会员按 404 处理。"""
     assert client.get(f"{API}/members/999999/public").status_code == 404

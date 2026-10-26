@@ -1,8 +1,12 @@
 """站内消息测试：互动事件写入通知、未读数、已读。"""
 
 import uuid
+from datetime import datetime
+
+import pytest
 
 from app.core.config import settings
+from app.models.message import MemberMessage
 
 API = settings.API_V1_PREFIX
 POSTS = f"{API}/posts"
@@ -142,3 +146,232 @@ def test_audit_results_create_messages(client, auth_headers):
     )
     author_types = [item["type"] for item in _messages(client, author)]
     assert "post_audit" in author_types
+
+
+@pytest.fixture()
+def mixed_messages(client, testing_session_local):
+    """交错写入不同类型和不同会员的消息，避免分页后过滤也侥幸通过。"""
+    member_id, headers, _ = _register_member(client)
+    other_id, other_headers, _ = _register_member(client)
+    message_types = [
+        "like", "follow", "comment", "like", "post_audit",
+        "follow", "like", "comment_audit",
+    ]
+    own_ids = {message_type: [] for message_type in message_types}
+    other_ids = []
+    with testing_session_local() as db:
+        for message_type in message_types:
+            message = MemberMessage(
+                member_id=member_id,
+                type=message_type,
+                title=f"我的{message_type}消息",
+                created_at=datetime(2026, 1, 1),
+            )
+            other_message = MemberMessage(
+                member_id=other_id,
+                type=message_type,
+                title=f"他人的{message_type}消息",
+                created_at=datetime(2026, 1, 1),
+            )
+            db.add_all([message, other_message])
+            db.flush()
+            own_ids[message_type].append(message.id)
+            other_ids.append(other_message.id)
+        db.commit()
+    return headers, other_headers, own_ids, other_ids
+
+
+@pytest.mark.parametrize(
+    "message_type", ["like", "follow", "comment", "post_audit", "comment_audit"]
+)
+def test_messages_filter_by_type(client, mixed_messages, message_type):
+    """三类互动和两类审核消息均支持 type 筛选，且不会泄漏他人消息。"""
+    headers, _, own_ids, other_ids = mixed_messages
+    response = client.get(MESSAGES, headers=headers, params={"type": message_type})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == len(own_ids[message_type])
+    assert [item["id"] for item in body["items"]] == own_ids[message_type][::-1]
+    assert all(item["type"] == message_type for item in body["items"])
+    assert not set(other_ids).intersection(item["id"] for item in body["items"])
+
+
+def test_messages_without_type_returns_mixed_types(client, mixed_messages):
+    """不传 type 仍返回当前会员所有类型，并保持最新在前。"""
+    headers, _, own_ids, _ = mixed_messages
+    response = client.get(MESSAGES, headers=headers)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    expected_ids = sorted(
+        [message_id for ids in own_ids.values() for message_id in ids], reverse=True
+    )
+    assert body["total"] == len(expected_ids)
+    assert [item["id"] for item in body["items"]] == expected_ids
+    assert {item["type"] for item in body["items"]} == set(own_ids)
+
+
+def test_messages_filtered_pagination_total(client, mixed_messages):
+    """类型必须在 SQL 分页前过滤，total/pages 也只能计入自己的匹配消息。"""
+    headers, _, own_ids, _ = mixed_messages
+    expected_ids = own_ids["like"][::-1]
+    for page, expected in [(1, expected_ids[:2]), (2, expected_ids[2:]), (3, [])]:
+        response = client.get(
+            MESSAGES,
+            headers=headers,
+            params={"type": "like", "page": page, "page_size": 2},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["total"] == 3
+        assert body["pages"] == 2
+        assert body["page"] == page
+        assert body["page_size"] == 2
+        assert [item["id"] for item in body["items"]] == expected
+
+
+def test_messages_filter_cannot_read_other_members_messages(client, mixed_messages):
+    """双方按同类型查询也只能看见各自的消息。"""
+    _, other_headers, own_ids, other_ids = mixed_messages
+    response = client.get(MESSAGES, headers=other_headers, params={"type": "follow"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == 2
+    assert all(item["type"] == "follow" for item in body["items"])
+    assert {item["id"] for item in body["items"]}.issubset(other_ids)
+    assert not set(own_ids["follow"]).intersection(item["id"] for item in body["items"])
+
+
+@pytest.mark.parametrize("message_type", ["unknown", "LIKE", "", "like,follow"])
+def test_messages_invalid_type_returns_422(client, message_type):
+    _, headers, _ = _register_member(client)
+    response = client.get(MESSAGES, headers=headers, params={"type": message_type})
+    assert response.status_code == 422, response.text
+
+
+def test_messages_filter_with_no_matches_returns_empty_page(client, testing_session_local):
+    """当前会员没有该类型时返回空页，即使其他会员有匹配的消息。"""
+    member_id, headers, _ = _register_member(client)
+    other_id, _, _ = _register_member(client)
+    with testing_session_local() as db:
+        db.add_all([
+            MemberMessage(member_id=member_id, type="follow", title="我的关注消息"),
+            MemberMessage(member_id=other_id, type="like", title="他人的点赞消息"),
+        ])
+        db.commit()
+    response = client.get(MESSAGES, headers=headers, params={"type": "like"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["items"] == []
+    assert body["total"] == 0
+    assert body["pages"] == 0
+
+
+def test_unread_counts_by_type_cover_all_messages_and_isolate_members(
+    client, testing_session_local
+):
+    """分类统计包含五类、超过一页的未读，不含已读或其他会员的消息。"""
+    member_id, headers, _ = _register_member(client)
+    other_id, other_headers, _ = _register_member(client)
+    expected_counts = {
+        "like": 25, "follow": 2, "comment": 3,
+        "post_audit": 1, "comment_audit": 1,
+    }
+    with testing_session_local() as db:
+        for message_type, count in expected_counts.items():
+            db.add_all([
+                MemberMessage(member_id=member_id, type=message_type)
+                for _ in range(count)
+            ])
+            db.add(MemberMessage(
+                member_id=member_id, type=message_type, is_read=True
+            ))
+        db.add_all([
+            MemberMessage(member_id=other_id, type="like") for _ in range(4)
+        ])
+        db.commit()
+
+    response = client.get(f"{MESSAGES}/unread-count", headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "unread_count": sum(expected_counts.values()),
+        "counts_by_type": expected_counts,
+    }
+    other_response = client.get(f"{MESSAGES}/unread-count", headers=other_headers)
+    assert other_response.status_code == 200, other_response.text
+    assert other_response.json() == {
+        "unread_count": 4, "counts_by_type": {"like": 4},
+    }
+
+
+@pytest.mark.parametrize(
+    "message_type", ["like", "follow", "comment", "post_audit", "comment_audit"]
+)
+def test_mark_all_read_by_type_preserves_other_types_and_members(
+    client, mixed_messages, message_type
+):
+    """分类全读只清当前会员该类型，其余类型与其他会员保持未读，重复调用幂等。"""
+    headers, other_headers, own_ids, _ = mixed_messages
+    initial_counts = {kind: len(ids) for kind, ids in own_ids.items()}
+    remaining_counts = {
+        kind: count for kind, count in initial_counts.items() if kind != message_type
+    }
+    for _ in range(2):
+        response = client.post(
+            f"{MESSAGES}/read-all", headers=headers, params={"type": message_type}
+        )
+        assert response.status_code == 200, response.text
+        unread = client.get(f"{MESSAGES}/unread-count", headers=headers)
+        assert unread.status_code == 200, unread.text
+        assert unread.json() == {
+            "unread_count": sum(remaining_counts.values()),
+            "counts_by_type": remaining_counts,
+        }
+
+    items = _messages(client, headers)
+    assert all(item["is_read"] == (item["type"] == message_type) for item in items)
+    other_unread = client.get(f"{MESSAGES}/unread-count", headers=other_headers)
+    assert other_unread.status_code == 200, other_unread.text
+    assert other_unread.json() == {
+        "unread_count": sum(initial_counts.values()),
+        "counts_by_type": initial_counts,
+    }
+    assert all(not item["is_read"] for item in _messages(client, other_headers))
+
+
+@pytest.mark.parametrize("message_type", ["unknown", "LIKE", "", "like,follow"])
+def test_mark_all_read_invalid_type_returns_422_without_changes(
+    client, mixed_messages, message_type
+):
+    headers, _, own_ids, _ = mixed_messages
+    response = client.post(
+        f"{MESSAGES}/read-all", headers=headers, params={"type": message_type}
+    )
+    assert response.status_code == 422, response.text
+    unread = client.get(f"{MESSAGES}/unread-count", headers=headers)
+    assert unread.status_code == 200, unread.text
+    expected_counts = {kind: len(ids) for kind, ids in own_ids.items()}
+    assert unread.json() == {
+        "unread_count": sum(expected_counts.values()),
+        "counts_by_type": expected_counts,
+    }
+
+
+def test_mark_all_read_without_type_clears_all_types_only_for_current_member(
+    client, mixed_messages
+):
+    """省略 type 兼容旧客户端：全部清空，并且仍不能修改其他会员。"""
+    headers, other_headers, own_ids, _ = mixed_messages
+    for _ in range(2):
+        response = client.post(f"{MESSAGES}/read-all", headers=headers)
+        assert response.status_code == 200, response.text
+        unread = client.get(f"{MESSAGES}/unread-count", headers=headers)
+        assert unread.status_code == 200, unread.text
+        assert unread.json() == {"unread_count": 0, "counts_by_type": {}}
+    assert all(item["is_read"] for item in _messages(client, headers))
+    other_unread = client.get(f"{MESSAGES}/unread-count", headers=other_headers)
+    assert other_unread.status_code == 200, other_unread.text
+    expected_counts = {kind: len(ids) for kind, ids in own_ids.items()}
+    assert other_unread.json() == {
+        "unread_count": sum(expected_counts.values()),
+        "counts_by_type": expected_counts,
+    }
