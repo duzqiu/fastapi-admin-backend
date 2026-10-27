@@ -175,6 +175,20 @@ def get_public_post(
     return service.get_public_post(post_id, viewer=member)
 
 
+@public_router.get(
+    "/mine/{post_id}",
+    response_model=PostOut,
+    summary="我发布的一条动态（不限状态，需登录；未通过通知点进来改稿用）",
+)
+def get_my_post(
+    post_id: int,
+    member: Member = Depends(get_current_member),
+    service: PostService = Depends(get_post_service),
+) -> PostOut:
+    """作者本人查看自己的动态，待审核 / 已拒绝也能取到（仅本人）。"""
+    return service.get_member_post(post_id, member)
+
+
 # ------------------------- 关注动态 -------------------------
 @public_router.get(
     "/following",

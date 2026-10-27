@@ -953,3 +953,22 @@ def test_upload_large_image_is_shrunk(client):
     assert saved.status_code == 200
     with Image.open(io.BytesIO(saved.content)) as image:
         assert max(image.size) <= 1600
+
+def test_my_post_endpoint_returns_rejected_own_post(client, auth_headers):
+    """作者本人能按 ID 取回被拒绝的动态（未通过通知点进去改稿用），他人不行。"""
+    _member_id, member = _register_member(client)
+    _other_id, other = _register_member(client)
+
+    post = client.post(API, headers=member, json={"title": "待拒绝", "content": "正文"}).json()
+    client.patch(
+        f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "rejected"}
+    )
+
+    mine = client.get(f"{API}/mine/{post['id']}", headers=member)
+    assert mine.status_code == 200, mine.text
+    body = mine.json()
+    assert body["status"] == "rejected"
+    assert body["title"] == "待拒绝"
+
+    assert client.get(f"{API}/mine/{post['id']}", headers=other).status_code == 403
+    assert client.get(f"{API}/mine/{post['id']}").status_code == 401

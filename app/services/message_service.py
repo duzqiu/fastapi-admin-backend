@@ -62,14 +62,14 @@ class MessageService:
         *,
         page: int = 1,
         page_size: int = 20,
-        message_type: Optional[str] = None,
+        message_types: Optional[List[str]] = None,
     ) -> Tuple[List[MemberMessage], int]:
-        """某个会员的消息列表，可按类型筛选，最新的在前。"""
+        """某个会员的消息列表，可按类型（可多个）筛选，最新的在前。"""
         return self.messages.list_for_member(
             member_id,
             offset=(page - 1) * page_size,
             limit=page_size,
-            message_type=message_type,
+            message_types=message_types,
         )
 
     def unread_count(self, member_id: int) -> int:
@@ -87,8 +87,8 @@ class MessageService:
             self.db.commit()
 
     def mark_all_read(
-        self, member_id: int, message_type: Optional[str] = None
+        self, member_id: int, message_types: Optional[List[str]] = None
     ) -> None:
-        """标记指定类型已读；省略类型时兼容全部标记已读。"""
-        if self.messages.mark_all_read(member_id, message_type=message_type):
+        """标记指定类型（可多个）已读；省略类型时标记全部。"""
+        if self.messages.mark_all_read(member_id, message_types=message_types):
             self.db.commit()

@@ -16,17 +16,17 @@ from app.models.mixins import PKMixin, TimestampMixin
 class MessageType:
     """消息类型（存字符串，App 按它决定图标与点击后的跳转）。"""
 
-    LIKE = "like"                    # 有人赞了我的帖子
-    COMMENT = "comment"              # 有人评论了我的帖子
+    LIKE = "like"                    # 有人赞了我的动态
+    COMMENT = "comment"              # 有人评论了我的动态
     FOLLOW = "follow"                # 有人关注了我
-    POST_AUDIT = "post_audit"        # 帖子审核结果
+    POST_AUDIT = "post_audit"        # 动态审核结果
     COMMENT_AUDIT = "comment_audit"  # 评论审核结果
 
 
 class MemberMessage(PKMixin, TimestampMixin, Base):
     """站内消息：一条 = 发给某个会员的一条通知。
 
-    标题 / 内容在写入时就拼好（含触发人昵称、帖子标题），
+    标题 / 内容在写入时就拼好（含触发人昵称、动态标题），
     读取时不用再联表，列表页一次查询就够。
     """
 

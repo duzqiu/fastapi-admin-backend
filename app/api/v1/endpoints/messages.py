@@ -8,7 +8,7 @@
 消息由业务侧事件写入（点赞 / 评论 / 关注 / 审核结果），这里只负责读与标记。
 """
 
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
 
@@ -27,15 +27,19 @@ def list_messages(
     member: Member = Depends(get_current_member),
     service: MessageService = Depends(get_message_service),
     message_type: Optional[
-        Literal["like", "follow", "comment", "post_audit", "comment_audit"]
-    ] = Query(default=None, alias="type"),
+        List[Literal["like", "follow", "comment", "post_audit", "comment_audit"]]
+    ] = Query(
+        default=None,
+        alias="type",
+        description="类型筛选，可重复传（如 type=like&type=comment）或逗号分隔",
+    ),
 ) -> PageResult[MemberMessageOut]:
-    """当前会员的站内消息，可按 type 筛选，最新的在前。"""
+    """当前会员的站内消息，可按一个或多个 type 筛选，最新的在前。"""
     items, total = service.list_messages(
         member.id,
         page=page_params.page,
         page_size=page_params.page_size,
-        message_type=message_type,
+        message_types=message_type,
     )
     return PageResult.create(items, total, page_params.page, page_params.page_size)
 
@@ -63,11 +67,11 @@ def mark_all_read(
     member: Member = Depends(get_current_member),
     service: MessageService = Depends(get_message_service),
     message_type: Optional[
-        Literal["like", "follow", "comment", "post_audit", "comment_audit"]
-    ] = Query(default=None, alias="type"),
+        List[Literal["like", "follow", "comment", "post_audit", "comment_audit"]]
+    ] = Query(default=None, alias="type", description="类型，可重复传或逗号分隔"),
 ) -> MessageResponse:
-    """把指定类型的未读标为已读；省略 type 时标记全部类型。"""
-    service.mark_all_read(member.id, message_type=message_type)
+    """把指定类型（可多个）的未读标为已读；省略 type 时标记全部。"""
+    service.mark_all_read(member.id, message_types=message_type)
     return MessageResponse(message="已全部标记为已读")
 
 

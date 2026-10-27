@@ -210,6 +210,18 @@ class PostService:
         self._mark_interactions([post], viewer)
         return post
 
+    def get_member_post(self, post_id: int, member: Member) -> Post:
+        """作者本人查看自己的帖子（**不限状态**）。
+
+        用于「未通过审核」的消息点进来直接改稿：公开详情只出已通过的，
+        走这里才能拿到被拒绝的动态内容与图片。
+        """
+        post = self.get_or_404(post_id)
+        if post.member_id != member.id:
+            raise ForbiddenError("只能查看自己发布的动态")
+        self._mark_interactions([post], member)
+        return post
+
     def list_following_posts(
         self,
         member_id: int,
@@ -353,7 +365,7 @@ class PostService:
                 self._push_message(
                     post.member_id,
                     MessageType.LIKE,
-                    f"{member.display_name} 赞了你的帖子",
+                    f"{member.display_name} 赞了你的动态",
                     post.title,
                     post_id=post.id,
                     actor=member,
@@ -511,7 +523,7 @@ class PostService:
                 post_id=item.post_id,
             )
 
-        # 通过后才通知帖子作者「有人评论了你的帖子」——
+        # 通过后才通知动态作者「有人评论了你的动态」——
         # 这时评论已经能在 App 里看到，通知点进去不会扑空
         post = item.post
         if (
@@ -523,7 +535,7 @@ class PostService:
             self._push_message(
                 post.member_id,
                 MessageType.COMMENT,
-                f"{item.publisher or '有人'} 评论了你的帖子",
+                f"{item.publisher or '有人'} 评论了你的动态",
                 item.content,
                 post_id=item.post_id,
                 from_member_id=item.member_id,
@@ -602,9 +614,9 @@ class PostService:
             self._push_message(
                 post.member_id,
                 MessageType.POST_AUDIT,
-                "帖子已通过审核"
+                "动态已通过审核"
                 if status is PostStatus.APPROVED
-                else "帖子未通过审核",
+                else "动态未通过审核",
                 post.title,
                 post_id=post.id,
             )

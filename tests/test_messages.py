@@ -111,6 +111,9 @@ def test_like_and_comment_create_messages(client, auth_headers):
     assert "comment" in picked
     assert picked["like"]["post_id"] == post["id"]
     assert fan_name in picked["comment"]["title"]
+    # 文案统一用「动态」，不再出现「帖子」
+    assert "动态" in picked["like"]["title"]
+    assert "动态" in picked["comment"]["title"]
 
     # 自己赞自己的帖子：不该多出消息
     before = client.get(f"{MESSAGES}/unread-count", headers=author).json()["unread_count"]
@@ -144,8 +147,12 @@ def test_audit_results_create_messages(client, auth_headers):
     client.patch(
         f"{POSTS}/{pending['id']}/status", headers=auth_headers, json={"status": "approved"}
     )
-    author_types = [item["type"] for item in _messages(client, author)]
-    assert "post_audit" in author_types
+    author_items = _messages(client, author)
+    assert "post_audit" in [item["type"] for item in author_items]
+    audit_title = next(
+        item["title"] for item in author_items if item["type"] == "post_audit"
+    )
+    assert "动态" in audit_title and "帖子" not in audit_title
 
 
 @pytest.fixture()
@@ -375,3 +382,52 @@ def test_mark_all_read_without_type_clears_all_types_only_for_current_member(
         "unread_count": sum(expected_counts.values()),
         "counts_by_type": expected_counts,
     }
+
+def test_messages_filter_multiple_types(client, auth_headers):
+    """合并分类：一次传多个 type（赞和评论 / 系统消息）。"""
+    author_id, author, _ = _register_member(client)
+    fan_id, fan, _ = _register_member(client)
+
+    post = _approved_post(client, auth_headers, author)
+    client.post(f"{POSTS}/{post['id']}/like", headers=fan)
+    comment = client.post(
+        f"{POSTS}/{post['id']}/comments", headers=fan, json={"content": "多类型"}
+    ).json()
+    client.patch(
+        f"{COMMENTS}/{comment['id']}/status",
+        headers=auth_headers,
+        json={"status": "approved"},
+    )
+    client.post(f"{MEMBERS}/{author_id}/follow", headers=fan)
+
+    # 赞和评论：一次要两类
+    both = client.get(
+        MESSAGES, headers=author, params=[("type", "like"), ("type", "comment")]
+    )
+    assert both.status_code == 200, both.text
+    types = {item["type"] for item in both.json()["items"]}
+    assert types == {"like", "comment"}
+
+    # 系统消息：审核类（帖子审核 + 评论审核）
+    system = client.get(
+        MESSAGES,
+        headers=author,
+        params=[("type", "post_audit"), ("type", "comment_audit")],
+    )
+    assert system.status_code == 200, system.text
+    assert all(
+        item["type"] in {"post_audit", "comment_audit"}
+        for item in system.json()["items"]
+    )
+
+    # 一次传多个 type 的「全部已读」
+    marked = client.post(
+        f"{MESSAGES}/read-all",
+        headers=author,
+        params=[("type", "like"), ("type", "comment")],
+    )
+    assert marked.status_code == 200, marked.text
+    left = client.get(
+        MESSAGES, headers=author, params=[("type", "like"), ("type", "comment")]
+    ).json()["items"]
+    assert all(item["is_read"] for item in left)
