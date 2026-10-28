@@ -72,8 +72,13 @@ class EmailCodeService:
         }
 
     # ------------------------- 校验 -------------------------
-    def verify(self, email: str, scene: str, code: str) -> EmailCode:
-        """校验验证码，成功则标记为已使用（由调用方提交事务）。"""
+    def verify(
+        self, email: str, scene: str, code: str, *, consume: bool = True
+    ) -> EmailCode:
+        """校验验证码；默认成功后标记已使用，consume=False 时仅校验。
+
+        消耗成功验证码的事务由调用方提交；失败尝试及超限作废仍立即持久化。
+        """
         email = email.lower()
         record = self.codes.latest_usable(email, scene)
         if record is None:
@@ -91,7 +96,8 @@ class EmailCodeService:
             remaining = settings.EMAIL_CODE_MAX_ATTEMPTS - record.attempts
             raise BusinessError(f"验证码不正确，还可尝试 {max(remaining, 0)} 次")
 
-        record.used_at = utcnow()
-        self.db.add(record)
-        self.db.flush()
+        if consume:
+            record.used_at = utcnow()
+            self.db.add(record)
+            self.db.flush()
         return record

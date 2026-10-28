@@ -12,15 +12,30 @@ from app.schemas.auth import Token
 from app.schemas.common import MessageResponse
 from app.schemas.email import SendCodeRequest, SendCodeResponse
 from app.schemas.member import (
+    MemberCheckEmailRequest,
+    MemberCheckEmailResponse,
     MemberLogin,
     MemberOut,
     MemberRefresh,
     MemberRegister,
     MemberResetPassword,
+    MemberVerifyRegisterCode,
+    MemberVerifyResetCode,
 )
 from app.services.member_auth_service import MemberAuthService
 
 router = APIRouter(prefix="/member/auth", tags=["前端-用户中心-认证"])
+
+
+@router.post(
+    "/check-email", response_model=MemberCheckEmailResponse, summary="检查会员邮箱是否存在"
+)
+def check_email(
+    payload: MemberCheckEmailRequest,
+    service: MemberAuthService = Depends(get_member_auth_service),
+) -> MemberCheckEmailResponse:
+    """公开只读查询，仅返回邮箱是否已注册，不发送验证码。"""
+    return MemberCheckEmailResponse(exists=service.check_email(str(payload.email)))
 
 
 @router.post("/send-code", response_model=SendCodeResponse, summary="发送邮箱验证码")
@@ -75,6 +90,30 @@ def login_form(
 @router.post("/refresh", response_model=Token, summary="刷新会员令牌")
 def refresh(payload: MemberRefresh, service: MemberAuthService = Depends(get_member_auth_service)) -> Token:
     return Token(**service.refresh(payload.refresh_token))
+
+
+@router.post(
+    "/verify-register-code", response_model=MessageResponse, summary="验证注册邮箱验证码"
+)
+def verify_register_code(
+    payload: MemberVerifyRegisterCode,
+    service: MemberAuthService = Depends(get_member_auth_service),
+) -> MessageResponse:
+    """仅验证注册验证码，不消耗验证码；注册时仍需提交邮箱、验证码和密码。"""
+    service.verify_register_code(str(payload.email), payload.code)
+    return MessageResponse(message="验证码验证成功")
+
+
+@router.post(
+    "/verify-reset-code", response_model=MessageResponse, summary="验证重置密码验证码"
+)
+def verify_reset_code(
+    payload: MemberVerifyResetCode,
+    service: MemberAuthService = Depends(get_member_auth_service),
+) -> MessageResponse:
+    """仅验证验证码，不消耗验证码；重置密码时仍需提交邮箱、验证码和新密码。"""
+    service.verify_reset_code(str(payload.email), payload.code)
+    return MessageResponse(message="验证码验证成功")
 
 
 @router.post("/reset-password", response_model=MessageResponse, summary="忘记密码（验证码重置）")

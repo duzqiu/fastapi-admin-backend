@@ -29,6 +29,18 @@ def _validate_password_match(password: str, confirm_password: str) -> None:
 
 
 # ==================== 认证相关 ====================
+class MemberCheckEmailRequest(BaseModel):
+    """登录前检查会员邮箱是否存在。"""
+
+    email: EmailStr = Field(..., description="待检查的会员邮箱")
+
+
+class MemberCheckEmailResponse(BaseModel):
+    """仅返回邮箱是否存在，不包含会员资料或账号状态。"""
+
+    exists: bool
+
+
 class MemberRegister(BaseModel):
     """会员注册入参（邮箱验证码方式）。
 
@@ -58,6 +70,20 @@ class MemberLogin(BaseModel):
 
     email: EmailStr
     password: str = Field(..., min_length=1, max_length=PASSWORD_MAX)
+
+
+class MemberVerifyRegisterCode(BaseModel):
+    """验证注册邮箱验证码，不消耗验证码。"""
+
+    email: EmailStr
+    code: str = Field(..., min_length=4, max_length=10)
+
+
+class MemberVerifyResetCode(BaseModel):
+    """验证重置密码的邮箱验证码，不消耗验证码。"""
+
+    email: EmailStr
+    code: str = Field(..., min_length=4, max_length=10)
 
 
 class MemberResetPassword(BaseModel):

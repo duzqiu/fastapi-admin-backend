@@ -77,6 +77,10 @@ class MemberAuthService:
             raise UnauthorizedError("账号已被禁用，请联系客服")
         return member
 
+    def check_email(self, email: str) -> bool:
+        """只读检查邮箱是否存在，不发送验证码、不修改会员或验证码记录。"""
+        return self.members.email_taken(email.strip().lower())
+
     # ------------------------- 验证码 -------------------------
     def send_code(
         self, email: str, scene: EmailScene, request_ip: str = ""
@@ -161,6 +165,22 @@ class MemberAuthService:
         return self._issue_tokens(member)
 
     # ------------------------- 密码 -------------------------
+    def verify_register_code(self, email: str, code: str) -> None:
+        """验证注册邮箱验证码，不消耗验证码、不创建会员或签发令牌。"""
+        email = email.strip().lower()
+        if self.members.email_taken(email):
+            raise ConflictError("该邮箱已注册，请直接登录或使用「忘记密码」找回")
+
+        self.codes.verify(email, EmailScene.REGISTER.value, code, consume=False)
+
+    def verify_reset_code(self, email: str, code: str) -> None:
+        """验证找回密码验证码，不消耗验证码、不修改密码或签发令牌。"""
+        email = email.strip().lower()
+        if not self.members.email_taken(email):
+            raise BusinessError("该邮箱尚未注册")
+
+        self.codes.verify(email, EmailScene.RESET_PASSWORD.value, code, consume=False)
+
     def reset_password(self, payload: MemberResetPassword) -> None:
         """忘记密码：邮箱验证码 + 新密码。"""
         email = str(payload.email).lower()
