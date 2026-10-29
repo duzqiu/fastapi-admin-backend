@@ -10,7 +10,13 @@ from app.models.dish_order import ORDER_TRANSITIONS, DishOrder, DishOrderItem, O
 from app.models.email_code import EmailCode, EmailScene
 from app.models.member import Member, MemberFollow, MemberGender
 from app.models.message import MemberMessage, MessageType
-from app.models.official_article import OfficialArticle, OfficialArticleStatus
+from app.models.official_article import (
+    OfficialArticle,
+    OfficialArticleComment,
+    OfficialArticleFavorite,
+    OfficialArticleLike,
+    OfficialArticleStatus,
+)
 from app.models.post import (
     CommentStatus,
     Post,
@@ -92,4 +98,7 @@ __all__ = [
     "EDUCATION_DEGREE_LABELS",
     "User",
     "UserRole",
+    "OfficialArticleLike",
+    "OfficialArticleFavorite",
+    "OfficialArticleComment",
 ]

@@ -184,7 +184,10 @@ def test_latest_ordered_by_published_at_desc(client, auth_headers):
             f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
         )
 
-    titles = [item["title"] for item in client.get(f"{API}/latest").json()["items"]]
+    # 取大页：测试库是共享的，前面用例可能已经写了不少内容，
+    # 官号文章也会并进「最新」，只取默认 10 条容易漏掉这两条
+    items = client.get(f"{API}/latest", params={"page": 1, "page_size": 50}).json()["items"]
+    titles = [item["title"] for item in items]
     assert titles.index("最新-后") < titles.index("最新-先")
 
 

@@ -208,6 +208,42 @@ class PostFavoriteRepository(BaseRepository[PostFavorite]):
         )
         return {row[0]: int(row[1]) for row in self.db.execute(stmt).all()}
 
+    def list_favorited_entries(
+        self,
+        member_id: int,
+        *,
+        statuses: Tuple[str, ...] = (PostStatus.APPROVED.value,),
+        offset: int = 0,
+        limit: int = 10,
+    ) -> Tuple[List[Tuple[int, object]], int]:
+        """会员收藏的帖子 id + 收藏时间，最近收藏的在前（只出已通过的）。
+
+        收藏列表要和「收藏的官号文章」按时间混排，所以这里把时间也带出来。
+        """
+        conditions = [
+            PostFavorite.member_id == member_id,
+            Post.status.in_(list(statuses)),
+        ]
+        count_stmt = (
+            select(func.count())
+            .select_from(PostFavorite)
+            .join(Post, PostFavorite.post_id == Post.id)
+        )
+        stmt = select(PostFavorite.post_id, PostFavorite.created_at).join(
+            Post, PostFavorite.post_id == Post.id
+        )
+        for condition in conditions:
+            count_stmt = count_stmt.where(condition)
+            stmt = stmt.where(condition)
+        total = int(self.db.execute(count_stmt).scalar_one())
+        stmt = (
+            stmt.order_by(PostFavorite.created_at.desc(), PostFavorite.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        rows = [(int(row[0]), row[1]) for row in self.db.execute(stmt).all()]
+        return rows, total
+
     def list_posts(
         self,
         member_id: int,

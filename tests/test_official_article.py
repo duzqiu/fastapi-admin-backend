@@ -161,3 +161,32 @@ def test_official_articles_do_not_pollute_user_posts(client, auth_headers, publi
     result = client.get("/api/v1/posts", headers=auth_headers, params={"keyword": article["title"]})
     assert result.status_code == 200, result.text
     assert result.json()["total"] == 0
+
+def test_create_article_by_user_id(client, auth_headers, publisher, testing_session_local):
+    """发布人按「用户 ID」（用户列表里的 member_no）关联，出参与筛选都带它。"""
+    from app.models import Member as MemberModel
+
+    with testing_session_local() as db:
+        user_id = db.get(MemberModel, publisher).member_no
+
+    payload = article_payload(publisher)
+    payload.pop("member_id")
+    payload["user_id"] = user_id
+    body = create_article(client, auth_headers, payload)
+    assert body["user_id"] == user_id
+    assert body["member_id"] == publisher
+
+    listed = client.get(API, headers=auth_headers, params={"user_id": user_id}).json()
+    assert listed["total"] == 1
+    assert listed["items"][0]["user_id"] == user_id
+
+    # 既没给 user_id 也没给 member_id：明确报错
+    invalid = article_payload(publisher)
+    invalid.pop("member_id")
+    response = client.post(API, headers=auth_headers, json=invalid)
+    assert response.status_code == 400, response.text
+
+    # user_id 不存在
+    invalid["user_id"] = "0000000000"
+    response = client.post(API, headers=auth_headers, json=invalid)
+    assert response.status_code == 400, response.text

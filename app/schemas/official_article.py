@@ -18,7 +18,16 @@ ArticleURL = Annotated[HttpUrl, Field(max_length=2048)]
 class OfficialArticleCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    member_id: int = Field(..., ge=1, description="Publishing identity: an existing active member")
+    user_id: Optional[str] = Field(
+        default=None,
+        max_length=20,
+        description="发布人：用户列表里的「用户 ID」（member_no），优先使用这个",
+    )
+    member_id: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="发布人内部 ID（兼容旧调用；同时传 user_id 时以 user_id 为准）",
+    )
     url: ArticleURL
     title: NonblankTitle
     content: NonblankContent
@@ -29,7 +38,7 @@ class OfficialArticleCreate(BaseModel):
     board: Optional[str] = Field(default=None, max_length=100)
     rank: Optional[int] = Field(default=None, ge=1)
 
-    @field_validator("board")
+    @field_validator("board", "user_id")
     @classmethod
     def strip_board(cls, value):
         return value.strip() if isinstance(value, str) else value
@@ -54,6 +63,9 @@ class OfficialArticleStatusUpdate(BaseModel):
 class OfficialArticleOut(ORMBaseModel):
     id: int
     article_no: str
+    user_id: str = Field(
+        default="", description="发布人的「用户 ID」（member_no，与用户列表一致）"
+    )
     member_id: Optional[int]
     publisher: str
     publisher_snapshot: str

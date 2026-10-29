@@ -1,7 +1,8 @@
 """Business logic for admin-managed official articles."""
 
-from typing import Optional, Tuple, List, Union
+from typing import List, Optional, Tuple, Union
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessError, NotFoundError
@@ -30,10 +31,26 @@ class OfficialArticleService:
                 return value
         raise BusinessError("文章编号生成失败，请稍后重试")
 
-    def _member(self, member_id: int) -> Member:
-        member = self.db.get(Member, member_id)
+    def _member(
+        self, payload: Union[OfficialArticleCreate, OfficialArticleUpdate]
+    ) -> Member:
+        """定位发布人：优先用「用户 ID」（member_no），否则退回内部 member_id。"""
+        member = None
+        if payload.user_id:
+            member = (
+                self.db.execute(
+                    select(Member).where(Member.member_no == payload.user_id.strip())
+                )
+                .scalars()
+                .first()
+            )
+        elif payload.member_id:
+            member = self.db.get(Member, payload.member_id)
+        else:
+            raise BusinessError("请填写发布人的用户 ID")
+
         if member is None or not member.is_active:
-            raise BusinessError("发布人不存在或已被禁用")
+            raise BusinessError("用户不存在或已被禁用")
         return member
 
     def _values(self, payload: Union[OfficialArticleCreate, OfficialArticleUpdate], member: Member) -> dict:
@@ -43,11 +60,13 @@ class OfficialArticleService:
         data["published_at"] = data["published_at"].astimezone()
         data["crawled_at"] = data["crawled_at"].astimezone()
         data["publisher_snapshot"] = member.display_name
-        data.pop("member_id")
+        # member_id / user_id 只用于定位发布人，不直接落库
+        data.pop("member_id", None)
+        data.pop("user_id", None)
         return data
 
     def create(self, payload: OfficialArticleCreate) -> OfficialArticle:
-        member = self._member(payload.member_id)
+        member = self._member(payload)
         values = self._values(payload, member)
         item = self.articles.create(article_no=self._number(), member_id=member.id, status=OfficialArticleStatus.PENDING.value, view_count=0, **values)
         self.db.commit(); self.db.refresh(item)
@@ -55,7 +74,7 @@ class OfficialArticleService:
 
     def update(self, article_id: int, payload: OfficialArticleUpdate) -> OfficialArticle:
         item = self._get(article_id)
-        member = self._member(payload.member_id)
+        member = self._member(payload)
         values = self._values(payload, member)
         # Full replacement semantics: optional board/rank must be clearable.
         for field, value in {"member_id": member.id, "status": OfficialArticleStatus.PENDING.value, **values}.items():

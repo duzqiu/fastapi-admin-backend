@@ -69,6 +69,18 @@ class PostOut(ORMBaseModel):
 
     id: int
     post_no: str = Field(default="", description="帖子编号（12 位随机数字，对外展示的帖子 ID）")
+    kind: str = Field(
+        default="post", description="内容类型：post=用户动态，article=官号文章"
+    )
+    article_id: Optional[int] = Field(
+        default=None, description="官号文章 ID（kind=article 时有值）"
+    )
+    article_url: str = Field(
+        default="", description="官号文章原文链接（kind=article 时有值）"
+    )
+    article_source: str = Field(
+        default="", description="官号文章来源（kind=article 时有值）"
+    )
     publisher: str
     publisher_avatar: str = Field(
         default="", description="发布者头像地址（匿名发帖或未设置头像时为空）"
