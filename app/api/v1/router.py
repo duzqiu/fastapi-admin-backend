@@ -14,6 +14,7 @@ from app.api.v1.endpoints import (
     members,
     menu,
     messages,
+    official_articles,
     posts,
     resume,
     resume_public,
@@ -50,6 +51,8 @@ api_router.include_router(dish_orders.router)
 api_router.include_router(posts.public_router)
 api_router.include_router(posts.router)
 api_router.include_router(posts.comment_router)
+api_router.include_router(official_articles.public_router)
+api_router.include_router(official_articles.router)
 api_router.include_router(messages.router)
 
 # 代办事项

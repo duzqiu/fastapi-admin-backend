@@ -43,6 +43,7 @@ from app.schemas.dish_order import (
 )
 from app.schemas.email import SendCodeRequest, SendCodeResponse
 from app.schemas.post import PostCreate, PostOut, PostStatusUpdate, PostUpdate
+from app.schemas.official_article import OfficialArticleCreate, OfficialArticleOut, OfficialArticleStatusUpdate, OfficialArticleUpdate
 from app.schemas.resume import (
     ResumeEducationCreate,
     ResumeEducationOut,
