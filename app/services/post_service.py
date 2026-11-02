@@ -384,30 +384,58 @@ class PostService:
     # 候选池上限：先取最近这一批，再从里面随机抽，避免全表随机排序
     RECOMMEND_POOL_SIZE = 200
 
+    def _recommend_pool(self, viewer: Optional[Member] = None) -> list:
+        """构造推荐候选池；普通推荐和分页推荐必须使用同一套候选规则。"""
+        since = utcnow() - timedelta(days=self.RECOMMEND_WINDOW_DAYS)
+        pool = self.posts.list_published_since(
+            since=since, limit=self.RECOMMEND_POOL_SIZE
+        )
+        articles = self.articles.public_since(
+            since=since, limit=self.RECOMMEND_POOL_SIZE
+        )
+        # 帖子和官号文章放在同一个池子里，推荐位两种内容都会出现。
+        return merge_feed(
+            posts=pool,
+            article_items=self._article_dicts(articles, viewer),
+            sort_key=published_sort_key,
+        )
+
     def list_recommend(
         self,
         *,
         size: int = RECOMMEND_SIZE,
         viewer: Optional[Member] = None,
     ) -> List[Post]:
-        """首页「推荐」：近一年内发布的已通过动态，随机取 `size` 条。
-
-        池子按发布时间倒序取最近 `RECOMMEND_POOL_SIZE` 条，再用 Python 抽样：
-        比 `ORDER BY random()` 更容易跨数据库（随机函数各家写法不同），
-        动态量不大时也够用。
-        """
-        since = utcnow() - timedelta(days=self.RECOMMEND_WINDOW_DAYS)
-        pool = self.posts.list_published_since(since=since, limit=self.RECOMMEND_POOL_SIZE)
-        articles = self.articles.public_since(since=since, limit=self.RECOMMEND_POOL_SIZE)
-        # 帖子和官号文章放在同一个池子里抽样，推荐位两种内容都会出现
-        merged = merge_feed(
-            posts=pool,
-            article_items=self._article_dicts(articles, viewer),
-            sort_key=published_sort_key,
-        )
+        """首页旧版推荐：近一年内发布的已通过动态，随机取 `size` 条。"""
+        merged = self._recommend_pool(viewer)
         picked = random.sample(merged, min(size, len(merged)))
-        self._mark_interactions([item for item in picked if not isinstance(item, dict)], viewer)
+        self._mark_interactions(
+            [item for item in picked if not isinstance(item, dict)], viewer
+        )
         return picked
+
+    def list_recommend_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 10,
+        seed: Optional[str] = None,
+        viewer: Optional[Member] = None,
+    ) -> Tuple[list, int]:
+        """按刷新会话种子对推荐候选池稳定洗牌后分页。
+
+        App 在一次刷新会话的所有页中复用同一个 seed，避免每页重新随机导致重复；
+        下拉刷新或重新进入 Tab 时换 seed。候选池仍沿用推荐的近一年、每类最多 200 条限制。
+        """
+        merged = self._recommend_pool(viewer)
+        randomizer = random.Random(seed) if seed else random.Random()
+        randomizer.shuffle(merged)
+        offset = (page - 1) * page_size
+        items = merged[offset : offset + page_size]
+        self._mark_interactions(
+            [item for item in items if not isinstance(item, dict)], viewer
+        )
+        return items, len(merged)
 
     def record_view(self, post_id: int) -> Post:
         """记录一次访问（详情页打开时调用），返回带最新 `view_count` 的内容。

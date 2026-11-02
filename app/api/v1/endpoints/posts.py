@@ -122,12 +122,36 @@ def list_recommend_posts(
     member: Optional[Member] = Depends(get_optional_member),
     service: PostService = Depends(get_post_service),
 ) -> List[PostOut]:
-    """首页「推荐」：从近一年内已审核通过的动态里随机抽 10 条。
+    """旧版推荐接口：从近一年内已审核通过的动态里随机抽 10 条。
 
-    不分页：每次调用重新随机（条数不足 10 条时有多少给多少）；
-    不需要登录，带了会员令牌时 `is_favorited` 会按该会员的收藏状态返回。
+    保留这个不分页接口兼容已有客户端；新 App 使用下方的分页接口。
     """
     return service.list_recommend(viewer=member)
+
+
+@public_router.get(
+    "/recommend/page",
+    response_model=PageResult[PostOut],
+    summary="推荐动态（分页，无需登录）",
+)
+def list_recommend_page(
+    page_params: PageParams = Depends(),
+    seed: Optional[str] = Query(None, min_length=1, max_length=128),
+    member: Optional[Member] = Depends(get_optional_member),
+    service: PostService = Depends(get_post_service),
+) -> PageResult[PostOut]:
+    """推荐动态分页。
+
+    同一次刷新会话应复用同一个 `seed`，服务端会对候选池稳定洗牌后切页，
+    避免每次加载下一页重新随机造成重复。未传 seed 时仍可请求，但每页随机顺序不保证一致。
+    """
+    items, total = service.list_recommend_page(
+        page=page_params.page,
+        page_size=page_params.page_size,
+        seed=seed,
+        viewer=member,
+    )
+    return PageResult.create(items, total, page_params.page, page_params.page_size)
 
 
 @public_router.get(
