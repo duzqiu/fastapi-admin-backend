@@ -1,12 +1,16 @@
 # 后台管理系统 · FastAPI 后端
 
-基于 **FastAPI + SQLAlchemy 2.0 + Pydantic V2** 的分层后台接口系统，本地默认使用零配置的 SQLite，
-可通过一个脚本「暴力迁移」到 PostgreSQL / MySQL。
+基于 **FastAPI + SQLAlchemy 2.0 + Pydantic V2** 的分层接口服务。本地零配置使用 SQLite，
+可通过脚本迁移到 PostgreSQL / MySQL；同时为三个客户端提供 API：
 
-系统显示名称由 `PROJECT_NAME` 统一控制（默认 `后台管理系统`），会同步出现在接口文档标题、
+| 客户端 | 身份 | 说明 |
+| --- | --- | --- |
+| `fastapi-admin-frontend` | 后台账号（`scope=staff`） | Vue 3 后台管理界面 |
+| `flet-post-app` | 会员（`scope=member`） | Flet 跨平台移动端 App |
+| 个人网站前台 | 匿名 | 简历公开接口 + 站点欢迎语 |
+
+系统显示名称由 `PROJECT_NAME` 统一控制（默认 `后台管理系统`），同步出现在接口文档标题、
 根路径响应、后台「系统信息」卡片与邮件标题中。
-
-本项目可**独立部署**，与前端项目 `fastapi-admin-frontend` 之间仅通过 HTTP 接口通讯。
 
 ---
 
@@ -15,39 +19,35 @@
 - [一、项目简介](#一项目简介)
 - [二、技术栈](#二技术栈)
 - [三、分层架构设计](#三分层架构设计)
-- [四、目录结构与各文件功能](#四目录结构与各文件功能)
-- [五、快速开始（初始化与启动）](#五快速开始初始化与启动)
+- [四、目录结构](#四目录结构)
+- [五、快速开始](#五快速开始)
 - [六、环境变量说明](#六环境变量说明)
 - [七、接口清单](#七接口清单)
-- [八、用户中心（会员体系）](#八用户中心会员体系)
-- [九、点菜菜单与订单体系](#九点菜菜单与订单体系)
-- [十、数据库迁移：SQLite → PostgreSQL / MySQL](#十数据库迁移sqlite--postgresql--mysql)
-- [十一、数据库结构版本管理（Alembic）](#十一数据库结构版本管理alembic)
+- [八、账号体系与认证](#八账号体系与认证)
+- [九、内容体系（动态 / 官号文章 / 互动 / 消息）](#九内容体系动态--官号文章--互动--消息)
+- [十、个人网站（简历 + 站点设置）](#十个人网站简历--站点设置)
+- [十一、数据库与结构演进](#十一数据库与结构演进)
 - [十二、测试](#十二测试)
 - [十三、生产部署](#十三生产部署)
-- [十四、与前端项目的对接](#十四与前端项目的对接)
+- [十四、与客户端项目的对接](#十四与客户端项目的对接)
 
 ---
 
 ## 一、项目简介
 
-一个「拿来即用」的后台接口骨架，包含四块可直接复用的能力：
-
 | 能力 | 说明 |
 | --- | --- |
-| 后台账号认证鉴权 | 账号密码登录、JWT（access + refresh）、角色权限（admin / editor / user） |
-| 用户中心（会员） | 邮箱验证码注册（自动分配 10 位唯一会员编号）、登录、忘记密码、个人资料（昵称/头像/背景图/性别/生日/简介）、头像与背景图上传 |
-| 文章与评论 | 动态发布、评论、点赞 / 收藏、后台审核；**官号文章**独立域（发布 / 编辑 / 审核 / 访问量） |
-| 通用后台 CRUD | 后台用户管理、**会员管理**（查看 / 修改 / 启禁用 / 重置密码 / 删除）、**官号文章**（发布 / 编辑 / 审核 / 访问量）、动态与评论审核 |
-| 分层基础设施 | 统一配置、统一异常、统一分页、请求日志、跨域、邮件、文件上传、初始化与迁移脚本 |
-| 部署方式 | 单机 / Gunicorn / systemd / Nginx 反代，以及 **Docker 容器（可对接另一个容器里的 PostgreSQL）** |
+| 双账号体系 | 后台账号（管理员创建、带角色）与会员（邮箱自助注册），JWT 按 `scope` 隔离 |
+| 内容 | 用户动态（发布 / 审核 / 点赞 / 收藏 / 评论）、官号文章（独立域，与动态同流展示） |
+| 社交 | 关注（关注流 / 关注列表）、站内消息（评论 / 点赞 / 审核结果 / 公告）、未读数 |
+| 个人网站 | 六组简历数据（个人信息 / 教育 / 工作 / 项目 / 评价 / 技能标签）+ 对外合并接口 |
+| 站点设置 | 首页欢迎语三件套、「关于我」访问密码（bcrypt） |
+| 媒体 | 头像 / 背景图 / 动态图 / 简历头像上传，魔术字节校验、长边压缩、HEIC 自动转 JPEG |
+| 基础设施 | 统一配置、统一异常与错误码、统一分页、请求日志（`X-Request-Id`）、CORS、SMTP、Alembic |
+| 结构自愈 | 启动时自动建表、补列、放宽列长度；下线功能遗留表按白名单清理 |
 
-设计目标：**高内聚**（每种职能只出现在固定的一层里）、**低耦合**（上层依赖下层接口，替换任一层的实现不影响其他层）。
-
-> **两套账号体系互不通用**：`system_auth_admin_user` 表是**后台账号**（管理员创建、带权限），`member_account_info` 表是**用户中心注册用户**（邮箱自助注册、无后台权限）。
-> 两者签发的 JWT 带不同的 `scope`（`staff` / `member`），用户中心令牌无法访问任何后台接口，后台令牌也无法访问用户中心接口。
->
-> 表名遵循统一的 `一级功能_二级功能_功能` 规范（见 [11.3](#113-表命名规范与改名)），后台账号与前台用户从表名上一眼可辨。
+分层原则：**接口层只收参**、**服务层管业务与事务**、**仓储层管数据**，
+横切能力（配置 / 安全 / 日志 / 异常 / 存储）集中在 `app/core`。
 
 ---
 
@@ -56,176 +56,153 @@
 | 组件 | 版本 | 用途 |
 | --- | --- | --- |
 | Python | ≥ 3.10（已在 3.13 验证） | 运行环境 |
-| FastAPI | 0.115.6 | Web 框架 / 自动生成 OpenAPI 文档 |
+| FastAPI | 0.115.6 | Web 框架 / OpenAPI 文档 |
 | Uvicorn | 0.34.0 | ASGI 服务器 |
-| SQLAlchemy | 2.0.36 | ORM（2.0 声明式风格） |
-| Pydantic / pydantic-settings | 2.10.4 / 2.7.0 | 数据校验与配置管理 |
-| Alembic | 1.14.0 | 数据库结构版本管理 |
-| PyJWT + bcrypt | 2.10.1 / 4.2.1 | 令牌签发与密码哈希 |
-| smtplib（标准库） | — | 用户中心发送邮箱验证码，无需额外依赖 |
-| psycopg / PyMySQL | 3.2.3 / 1.1.1 | 迁移到 PG / MySQL 时的驱动 |
+| SQLAlchemy | ≥ 2.0.44 | ORM（2.0 声明式 `Mapped` / `mapped_column`） |
+| Pydantic / pydantic-settings | ≥ 2.10.4 / ≥ 2.7.0 | 校验与配置 |
+| Alembic | 1.14.0 | 结构版本管理 |
+| PyJWT + bcrypt | 2.10.1 / 4.2.1 | 令牌签发与密码哈希（刻意不用 passlib，规避 Python 3.13 `crypt` 移除） |
+| pillow / pillow-heif | ≥ 10.3 / ≥ 0.18 | 图片处理与 HEIC 解码 |
+| psycopg[binary] / PyMySQL | ≥ 3.2.3 / 1.1.1 | PG / MySQL 驱动（按需） |
+| lunar-python | 1.4.8 | 公历 ↔ 农历换算 |
+| pytest + httpx | 8.3.4 / 0.28.1 | 测试 |
+
+依赖清单见 `requirements.txt`（项目未使用 `pyproject.toml`）。
 
 ---
 
 ## 三、分层架构设计
-
-请求自上而下穿过各层，**每一层只依赖它下面的一层**：
 
 ```
 HTTP 请求
    │
    ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ 中间件层 Middlewares      CORS、请求日志、Request-Id、耗时统计 │
+│ 中间件  CORS、RequestLogMiddleware（X-Request-Id / 耗时）      │
 ├──────────────────────────────────────────────────────────────┤
-│ 接口层 API (Controller)   路由、参数校验(Pydantic)、鉴权依赖   │
-│  app/api/**                 只做「收参 → 调服务 → 返回」       │
+│ 接口层 API       路由、Pydantic 校验、鉴权依赖、分页参数        │
+│  app/api/**        只做「收参 → 调服务 → 返回」                │
 ├──────────────────────────────────────────────────────────────┤
-│ 服务层 Services           业务规则、组合仓储、事务边界(commit)  │
-│  app/services/**            抛语义化异常，不关心 HTTP          │
+│ 服务层 Services  业务规则、组合仓储、事务边界（commit）         │
+│  app/services/**   抛语义化异常，不关心 HTTP                   │
 ├──────────────────────────────────────────────────────────────┤
-│ 仓储层 Repositories       纯数据访问，只 flush 不 commit       │
-│  app/repositories/**        唯一可以出现 SQLAlchemy 语句的地方 │
+│ 仓储层 Repositories  纯数据访问，只 flush 不 commit            │
+│  app/repositories/** 唯一允许出现 SQLAlchemy 查询的地方        │
 ├──────────────────────────────────────────────────────────────┤
-│ 模型层 Models              ORM 表结构定义                      │
-│  app/models/**                                                 │
+│ 模型层 Models    ORM 表结构（app/models/**）                  │
 └──────────────────────────────────────────────────────────────┘
-   ▲
-   │ 横切关注点（被各层共用，不反向依赖上层）
-   ├── core/    配置、安全、日志、异常
-   ├── schemas/ 出入参 DTO
-   └── db/      Base、Engine、Session、初始化
+   ▲ 横切关注点：core/（配置/安全/日志/异常/存储/邮件/农历）、schemas/、db/
 ```
 
-**关键约束（保证低耦合）**
+**关键约束**
 
-1. 接口层不写 SQL、不写业务规则，只依赖服务层的接口。
-2. 服务层不直接使用 `select()` / `Session.query()`，所有数据访问都走仓储层。
-3. 仓储层不写业务判断，只提供数据操作；**只 `flush` 不 `commit`**，
-   事务提交统一由服务层控制，从而支持「多步操作原子提交」。
-4. 服务层抛出的是 `NotFoundError` / `ConflictError` 等语义化异常（`app/core/exceptions.py`），
-   由全局异常处理器统一翻译成 HTTP 响应，业务与协议解耦。
-5. 依赖注入集中在 `app/api/deps.py`，测试时可用 `app.dependency_overrides` 整体替换。
+1. 接口层不写 SQL、不写业务规则。
+2. 服务层不直接 `select()`，数据访问一律走仓储层。
+3. 仓储层只 `flush`，事务提交由服务层控制，支持多步操作原子提交。
+4. 服务层抛 `NotFoundError` / `ConflictError` / `BusinessError`（`app/core/exceptions.py`），
+   由全局处理器翻译为统一错误码响应。
+5. 依赖注入集中在 `app/api/deps.py`，测试可用 `app.dependency_overrides` 替换。
 
 ---
 
-## 四、目录结构与各文件功能
+## 四、目录结构
 
 ```
 fastapi-admin-backend/
 ├── app/
-│   ├── __init__.py                     包声明与版本号
-│   ├── main.py                         应用入口：装配中间件 / 路由 / 异常处理 / 生命周期
+│   ├── main.py                      应用入口：CORS / 日志中间件 / 异常 / 路由 / 静态资源 / lifespan
 │   │
-│   ├── core/                           ★ 横切关注点
-│   │   ├── config.py                   全局配置（读取 .env，pydantic-settings）
-│   │   ├── security.py                 密码哈希（bcrypt）、JWT 签发/解析、令牌作用域
-│   │   ├── exceptions.py               业务异常 + 全局异常处理器注册
-│   │   ├── mailer.py                   邮件发送（SMTP / 未启用时只打日志），验证码邮件模板
-│   │   ├── storage.py                  通用图片上传：后缀/大小/魔术字节校验、落盘、旧文件清理
-│   │   ├── logging.py                  日志格式与初始化
-│   │   └── utils.py                    通用工具（UTC 时间戳、本地时间、供应时段判定、10 位随机编号）
+│   ├── core/                        ★ 横切关注点
+│   │   ├── config.py                全局配置（pydantic-settings，缓存单例）
+│   │   ├── security.py              bcrypt 哈希、JWT 签发/解析、staff / member 作用域
+│   │   ├── exceptions.py            业务异常 + 全局异常处理器 + 错误码
+│   │   ├── mailer.py                SMTP 发信（未启用时只打日志）、验证码邮件模板
+│   │   ├── storage.py               通用图片上传：后缀/大小/魔术字节/长边压缩/HEIC 转 JPEG
+│   │   ├── member_media.py          会员头像与背景图地址解析（按会员 ID 反查磁盘文件）
+│   │   ├── site_password.py         站点「关于我」密码哈希（SHA-256 预处理 + bcrypt）
+│   │   ├── lunar.py                 农历文本、节气 / 节日
+│   │   ├── logging.py               日志格式与初始化
+│   │   └── utils.py                 UTC 时间、本地时间、10 位会员编号生成
 │   │
-│   ├── db/                             ★ 数据访问基础设施
-│   │   ├── base.py                     SQLAlchemy DeclarativeBase
-│   │   ├── session.py                  引擎构建（自动适配 SQLite/PG/MySQL）、会话工厂、get_db
-│   │   ├── schema_sync.py              ★ 启动时自动补齐「模型有、库里没有」的列，并自动放宽长度不足的字符串列
-│   │   └── init_db.py                  建表 + 自动补列 + 初始管理员 + 演示会员/菜品数据（幂等）
+│   ├── db/
+│   │   ├── base.py                  DeclarativeBase
+│   │   ├── session.py               引擎（自动适配 SQLite/PG/MySQL）、SessionLocal、get_db
+│   │   ├── init_db.py               建表 + 删遗留表 + 补列 + 初始管理员/演示会员/站点设置（幂等）
+│   │   ├── schema_sync.py           自动补列、自动放宽字符串长度（只加/只放宽）
+│   │   └── legacy_cleanup.py        按白名单删除下线功能遗留表（8 张）
 │   │
-│   ├── models/                         ★ ORM 模型层
-│   │   ├── mixins.py                   主键 / 时间戳 Mixin
-│   │   ├── user.py                     后台账号表 system_auth_admin_user + UserRole 枚举
-│   │   ├── member.py                   注册用户表 member_account_info（含 10 位唯一编号）+ MemberGender
-│   │   ├── email_code.py               邮箱验证码表 + EmailScene 枚举（场景）
-│   │   ├── post.py                     文章 / 评论 / 点赞 / 收藏
-│   │   ├── official_article.py         官号文章
-│   │   └── __init__.py                 统一导出（新增模型必须在此注册）
+│   ├── models/                      ★ ORM（表名规范：一级_二级_功能）
+│   │   ├── mixins.py                PKMixin / TimestampMixin
+│   │   ├── user.py                  system_auth_admin_user + UserRole
+│   │   ├── member.py                member_account_info / member_account_follow + MemberGender
+│   │   ├── email_code.py            member_account_email_code + EmailScene
+│   │   ├── post.py                  article_post_info / _like / _favorite / _comment
+│   │   ├── official_article.py      article_official_info / _like / _favorite / _comment + ARTICLE_ID_OFFSET
+│   │   ├── message.py               member_account_message + MessageType
+│   │   ├── resume.py                resume_base_personal_info / _education / _work / _project / _evaluation / _skill_tag
+│   │   ├── site_setting.py          site_setting（单例 id=1）
+│   │   └── __init__.py              统一导出（新增模型必须在此注册）
 │   │
-│   ├── schemas/                        ★ DTO 层
-│   │   ├── common.py                   分页结果、通用消息体
-│   │   ├── user.py                     后台账号出入参（含密码强度校验）
-│   │   ├── member.py                   会员注册/登录/资料/后台管理出入参
-│   │   ├── email.py                    验证码发送出入参
-│   │   ├── post.py                     动态 / 评论出入参
-│   │   ├── official_article.py         官号文章出入参
-│   │   ├── auth.py                     登录 / 令牌模型
-│   │   ├── system.py                   健康检查、系统信息、首页统计
-│   │   └── __init__.py                 统一导出
+│   ├── schemas/                     ★ DTO（auth / user / member / email / post / official_article /
+│   │                                  message / resume / resume_public / site / system / common）
 │   │
-│   ├── repositories/                   ★ 仓储层（数据访问）
-│   │   ├── base.py                     通用 CRUD/分页/统计基类
-│   │   ├── user_repository.py          后台账号表专属查询
-│   │   ├── member_repository.py        会员表专属查询（含性别/新注册统计）
-│   │   ├── email_code_repository.py    验证码查询、作废、尝试次数
-│   │   ├── post_repository.py          动态 / 评论 / 点赞 / 收藏查询
-│   │   ├── official_article_repository.py 官号文章查询与访问量
-│   │   └── __init__.py
+│   ├── repositories/                ★ 数据访问
+│   │   ├── base.py                  通用 CRUD / 分页 / 统计
+│   │   ├── user_repository.py
+│   │   ├── member_repository.py     会员 + MemberFollowRepository
+│   │   ├── email_code_repository.py
+│   │   ├── post_repository.py       动态 / 评论 / 点赞 / 收藏
+│   │   ├── official_article_repository.py
+│   │   ├── official_article_interaction_repository.py   点赞 / 收藏
+│   │   ├── official_article_comment_repository.py
+│   │   ├── message_repository.py
+│   │   ├── resume_repository.py     六类简历数据
+│   │   └── site_repository.py
 │   │
-│   ├── services/                       ★ 服务层（业务逻辑）
-│   │   ├── auth_service.py             后台账号：登录 / 刷新令牌 / 改密
-│   │   ├── user_service.py             后台账号 CRUD + 最后管理员保护等规则
-│   │   ├── email_code_service.py       验证码生成、限流、发送、校验
-│   │   ├── member_auth_service.py      会员：注册 / 登录 / 刷新 / 重置密码 / 改密
-│   │   ├── member_service.py           会员资料 + 图片上传（头像 / 背景图）+ 后台管理
-│   │   ├── post_service.py             动态发布 / 审核 / 评论
-│   │   ├── official_article_service.py 官号文章发布 / 编辑 / 审核 / 访问量
-│   │   ├── system_service.py           健康检查 / 系统信息 / 首页统计
-│   │   └── __init__.py
+│   ├── services/                    ★ 业务逻辑
+│   │   ├── auth_service.py          后台登录 / 刷新 / 改密
+│   │   ├── user_service.py          后台账号 CRUD + 最后管理员保护
+│   │   ├── email_code_service.py    验证码生成、限流、发送、校验
+│   │   ├── member_auth_service.py   会员注册 / 登录 / 刷新 / 重置密码
+│   │   ├── member_service.py        会员资料、媒体上传、后台管理、关注
+│   │   ├── post_service.py          动态 / 评论 / 点赞 / 收藏 / 关注流（含官号文章合流）
+│   │   ├── article_feed.py          官号文章 → 帖子出参映射、ID 偏移、列表合并与排序
+│   │   ├── official_article_service.py  官号文章 CRUD / 审核 / 访问量
+│   │   ├── message_service.py       站内消息、未读数、已读
+│   │   ├── resume_service.py        六类简历 CRUD / 启停 / 对外合并
+│   │   ├── site_service.py          欢迎语、关于我密码
+│   │   └── system_service.py        健康检查 / 运行信息 / 首页统计
 │   │
-│   ├── api/                            ★ 接口层
-│   │   ├── deps.py                     依赖注入：Session、当前用户/会员、管理员校验、分页、各 Service
+│   ├── api/
+│   │   ├── deps.py                  Session、当前用户/会员、管理员校验、分页、各 Service
 │   │   └── v1/
-│   │       ├── router.py               v1 路由聚合
-│   │       └── endpoints/
-│   │           ├── auth.py              /auth/*         后台账号登录、刷新、改密
-│   │           ├── users.py             /users/*        后台账号管理（仅管理员）
-│   │           ├── member_auth.py       /member/auth/*  用户中心：验证码、注册、登录、重置密码
-│   │           ├── member_profile.py    /member/*       用户中心：我的资料、头像 / 背景图、改密
-│   │           ├── members.py           /members/*      后台会员管理（仅管理员）
-│   │           ├── posts.py            /posts/*        动态与评论（C 端 + 后台审核）
-│   │           ├── official_articles.py /official-articles/* 官号文章（后台 + 公开详情）
-│   │           └── system.py            /system/*       健康检查、系统信息、首页统计
-│   │
-│   └── middlewares/
-│       └── request_log.py              请求日志中间件（X-Request-Id、耗时、静态资源跳过）
+│   │       ├── router.py            v1 聚合
+│   │       └── endpoints/           auth / users / member_auth / member_profile / member_public /
+│   │                                members / posts / official_articles / messages / resume /
+│   │                                resume_public / site / system
+│   ├── middlewares/request_log.py   X-Request-Id、耗时、跳过文档与静态资源
+│   └── static/                      内置资源（default-avatar.svg）
 │
-├── alembic/                            数据库结构迁移
-│   ├── env.py                          连接串复用 settings.DATABASE_URL
-│   ├── script.py.mako                  迁移脚本模板
-│   └── versions/                       迁移脚本存放目录
-├── alembic.ini                         Alembic 配置
-│
+├── alembic/                         5 个版本（地区、背景图、收藏、官号文章、删除遗留表）
 ├── scripts/
-│   ├── init_db.py                      手动初始化数据库（建表 + 初始数据）
-│   └── migrate_database.py             ★ SQLite → PG/MySQL 数据迁移工具
-│
-├── tests/
-│   ├── conftest.py                     测试夹具（内存 SQLite、TestClient、鉴权头）
-│   ├── test_api.py                     认证 / 后台账号主链路冒烟测试
-│   ├── test_member.py                  用户中心全流程测试
-│   └── test_retired_features.py        已下线接口（菜品管理 / 倒数日）回归测试
-│
-├── data/                               SQLite 数据文件目录（git 忽略，自动创建）
-├── run.py                              开发环境启动脚本
-├── requirements.txt                    依赖清单
-├── pytest.ini                          pytest 配置
-│
-├── Dockerfile                          ★ 后端镜像（Python 3.13-slim + 非 root + 健康检查）
-├── .dockerignore                       构建上下文排除规则（不含 .env / data）
-├── docker-compose.yml                  ★ 后端容器编排，连接宿主机上另一个 PG 容器
-├── .env.docker.example                 compose 变量模板（cp 成 .env 使用，含 PG 连接信息）
-│
-├── .env.example                        环境变量模板
-└── .gitignore
+│   ├── init_db.py                   手动初始化（等价于启动时的 init_db）
+│   └── migrate_database.py          SQLite → PG/MySQL 数据迁移 / 行数校验
+├── tests/                           22 个 pytest 文件（见第十二节）
+├── data/                            SQLite 与上传目录（git 忽略，自动创建）
+├── run.py                           开发启动脚本
+├── requirements.txt / pytest.ini
+├── Dockerfile / .dockerignore / docker-compose.yml / .env.docker.example
+├── .env.example
+└── README.md
 ```
 
 ---
 
-## 五、快速开始（初始化与启动）
+## 五、快速开始
 
-> 以下命令以 Windows PowerShell 为例，Linux/macOS 把 `.venv/Scripts/python` 换成 `.venv/bin/python` 即可。
+> 命令以 Windows PowerShell 为例；Linux/macOS 把 `.venv/Scripts/python` 换成 `.venv/bin/python`。
 
-### 1. 创建虚拟环境并安装依赖
+### 1. 安装依赖
 
 ```powershell
 cd fastapi-admin-backend
@@ -234,47 +211,41 @@ python -m venv .venv
 ./.venv/Scripts/python.exe -m pip install -r requirements.txt
 ```
 
-### 2. 准备配置文件
+### 2. 准备配置
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-`.env` 中至少确认两项：`SECRET_KEY`（生产必须改）与 `DATABASE_URL`（默认 SQLite，无需修改）。
+至少确认 `SECRET_KEY`（生产必须改）与 `DATABASE_URL`（默认 SQLite，无需改）。
 
-### 3. 初始化数据库
+### 3. 初始化数据库（可跳过）
 
 ```powershell
-# 建表 + 自动补上模型里新增的列 + 创建管理员 + 写入演示会员/菜品数据（幂等，可重复执行）
 ./.venv/Scripts/python.exe scripts/init_db.py
 ```
 
-> 每次启动都会自动补齐「模型有、库里没有」的列（`app/db/schema_sync.py`），
-> 所以升级代码后**不需要手工跑迁移**，直接重启即可，见 [11.2](#112-给已有表补充新列)。
+应用启动时 `lifespan` 也会调用同一套 `init_db()`，幂等可重复执行。默认创建：
 
-默认会创建：
+- 后台账号 `admin / admin123`
+- 3 个演示会员（`alice@example.com` / `bob@example.com` / `carol@example.com`，密码统一 `members123`）
+- 站点设置单例（「关于我」默认密码 `123456`）
 
-- 后台账号 `admin / admin123`（可用 `.env` 中的 `FIRST_SUPERUSER_*` 修改）
-- 3 个用户中心演示会员（`alice@example.com` 等，密码统一 `members123`，详见 [8.7](#87-演示数据)）
-
-> 也可以跳过这一步：应用启动时的生命周期钩子会自动调用 `init_db()`。
-
-### 4. 启动服务
+### 4. 启动
 
 ```powershell
-# 方式一：推荐（读取 .env 的 HOST/PORT，DEBUG=true 时自动热重载）
+# 方式一：读取 .env 的 HOST/PORT，DEBUG=true 时自动热重载
 ./.venv/Scripts/python.exe run.py
 
-# 方式二：直接使用 uvicorn
+# 方式二：直接 uvicorn
 ./.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
-启动后：
-
 | 地址 | 说明 |
 | --- | --- |
-| http://127.0.0.1:8000/docs | Swagger UI（点右上角 Authorize 可用 `admin/admin123` 调试） |
-| http://127.0.0.1:8000/redoc | ReDoc 文档 |
+| http://127.0.0.1:8000/docs | Swagger UI（Authorize 可用 `admin/admin123`） |
+| http://127.0.0.1:8000/redoc | ReDoc |
+| http://127.0.0.1:8000/api/v1/openapi.json | OpenAPI 描述 |
 | http://127.0.0.1:8000/api/v1/system/health | 健康检查 |
 
 ### 5. 验证
@@ -289,42 +260,52 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
 
 ## 六、环境变量说明
 
+### 基础与安全
+
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `PROJECT_NAME` | 后台管理系统 | 系统显示名称（文档标题、系统信息、邮件标题） |
+| `PROJECT_NAME` | 后台管理系统 | 系统显示名称 |
+| `VERSION` / `DESCRIPTION` | 1.0.0 / … | OpenAPI 信息 |
+| `API_V1_PREFIX` | `/api/v1` | 接口前缀（同时决定静态资源挂载点） |
 | `DEBUG` | true | 调试模式（影响热重载） |
 | `HOST` / `PORT` | 0.0.0.0 / 8000 | 监听地址与端口 |
 | `LOG_LEVEL` | INFO | 日志级别 |
-| `DATABASE_URL` | sqlite:///./data/app.db | 数据库连接串（见下节） |
+| `DATABASE_URL` | sqlite:///./data/app.db | 连接串 |
 | `SQL_ECHO` | false | 是否打印 SQL |
-| `DROP_LEGACY_TABLES` | true | 启动时自动删除已下线功能（菜品管理 / 待办）遗留的 8 张表；删除不可恢复 |
+| `DROP_LEGACY_TABLES` | true | 启动时删除下线功能的遗留表（8 张，不可恢复） |
 | `SECRET_KEY` | 示例值 | JWT 签名密钥，**生产必须更换** |
 | `ALGORITHM` | HS256 | JWT 算法 |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | 1440 | access_token 有效期（分钟） |
-| `REFRESH_TOKEN_EXPIRE_MINUTES` | 10080 | refresh_token 有效期（分钟） |
-| `BACKEND_CORS_ORIGINS` | localhost:5173 等 | 允许跨域来源，逗号分隔 |
-| `FIRST_SUPERUSER_*` | admin / admin123 / … | 初始管理员账号信息 |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | 1440 | access_token 有效期 |
+| `REFRESH_TOKEN_EXPIRE_MINUTES` | 10080 | refresh_token 有效期 |
+| `BACKEND_CORS_ORIGINS` | 5173 / 4173 本地地址 | 允许跨域来源，逗号分隔 |
+| `FIRST_SUPERUSER_USERNAME/PASSWORD/EMAIL/NICKNAME` | admin / admin123 / … | 初始管理员 |
 | `DEFAULT_PAGE_SIZE` / `MAX_PAGE_SIZE` | 10 / 200 | 分页默认值与上限 |
 
-**用户中心（会员）相关**
+### 邮件与验证码
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `MAIL_ENABLED` | false | 是否真正发送邮件；false 时验证码只写入服务端日志 |
-| `MAIL_HOST` / `MAIL_PORT` | smtp.example.com / 465 | SMTP 服务器与端口 |
-| `MAIL_USERNAME` / `MAIL_PASSWORD` | 空 | SMTP 登录账号（多数邮箱需使用「授权码」而非登录密码） |
-| `MAIL_FROM` | 后台管理系统 <noreply@example.com> | 发件人。**建议直接写 `你的邮箱`**：服务商会校验「信封发件人 == 登录账号」。注意 `${MAIL_FROM:-...}` 的 `:-` 在**值为空时也会取默认值**，老版 compose 留空会变成 `noreply@example.com` 而被拒发（新版已改为 `${MAIL_FROM:-}`，留空才回退到 `MAIL_USERNAME`） |
-| `MAIL_USE_SSL` | true | true 用 `SMTP_SSL`，false 用 `SMTP + STARTTLS` |
+| `MAIL_ENABLED` | false | false 时验证码只写日志 |
+| `MAIL_HOST` / `MAIL_PORT` | smtp.example.com / 465 | SMTP 服务器 |
+| `MAIL_USERNAME` / `MAIL_PASSWORD` | 空 | 登录账号（多数邮箱用授权码） |
+| `MAIL_FROM` | 后台管理系统 <noreply@example.com> | 发件人，建议与 `MAIL_USERNAME` 完全一致 |
+| `MAIL_USE_SSL` | true | true = `SMTP_SSL`；false = `SMTP + STARTTLS` |
 | `MAIL_TIMEOUT` | 10 | 发信超时（秒） |
 | `EMAIL_CODE_LENGTH` | 6 | 验证码位数 |
-| `EMAIL_CODE_EXPIRE_MINUTES` | 10 | 验证码有效期 |
-| `EMAIL_CODE_RESEND_SECONDS` | 60 | 同一邮箱 + 场景的重发冷却时间 |
-| `EMAIL_CODE_MAX_ATTEMPTS` | 5 | 同一验证码最多允许校验失败次数 |
-| `EMAIL_CODE_DEBUG_RETURN` | true | 是否在响应 `debug_code` 回显验证码（**生产必须 false**） |
-| `DEFAULT_AVATAR` | /api/v1/assets/default-avatar.svg | 会员注册后的默认头像地址（内置资源，由 `app/static` 托管） |
-| `UPLOAD_DIR` | ./data/uploads | 上传目录（相对路径以项目根目录为基准） |
-| `IMAGE_MAX_SIZE_MB` | 5 | 图片（会员头像 / 背景图 / 菜品图片）大小上限 |
-| `IMAGE_ALLOWED_EXTENSIONS` | jpg,jpeg,png,webp,gif,heic,heif | 允许的图片后缀（**heic/heif 落盘前会转成 JPEG**，见 8.5） |
+| `EMAIL_CODE_EXPIRE_MINUTES` | 10 | 有效期 |
+| `EMAIL_CODE_RESEND_SECONDS` | 60 | 同邮箱 + 场景冷却时间 |
+| `EMAIL_CODE_MAX_ATTEMPTS` | 5 | 最多校验失败次数 |
+| `EMAIL_CODE_DEBUG_RETURN` | true | 是否在响应回显 `debug_code`（**生产必须 false**） |
+
+### 媒体
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `DEFAULT_AVATAR` | /api/v1/assets/default-avatar.svg | 默认头像 |
+| `UPLOAD_DIR` | ./data/uploads | 上传目录（相对路径以项目根为基准） |
+| `IMAGE_MAX_SIZE_MB` | 10 | 图片大小上限 |
+| `IMAGE_SHRINK_MAX_SIDE` | 1600 | 落盘前长边压缩尺寸 |
+| `IMAGE_ALLOWED_EXTENSIONS` | jpg,jpeg,png,webp,gif,heic,heif | HEIC/HEIF 落盘前转 JPEG |
 
 生成随机密钥：
 
@@ -332,664 +313,495 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
 ./.venv/Scripts/python.exe -c "import secrets;print(secrets.token_urlsafe(48))"
 ```
 
-常用邮箱的 SMTP 参考（`MAIL_PASSWORD` 请填写邮箱后台生成的授权码）。**本仓库的
-`.env.docker.example` 已按 QQ 邮箱预置好**（`MAIL_ENABLED=true` + `smtp.qq.com:465` +
-`MAIL_USE_SSL=true`），只需再补两项：`MAIL_USERNAME`（QQ 邮箱地址）与 `MAIL_PASSWORD`（授权码）：
+### 在 Docker 里启用邮件
 
-| 邮箱 | MAIL_HOST | MAIL_PORT | MAIL_USE_SSL |
-| --- | --- | --- | --- |
-| QQ 邮箱 | smtp.qq.com | 465 | true |
-| 163 邮箱 | smtp.163.com | 465 | true |
-| Gmail | smtp.gmail.com | 587 | false（STARTTLS） |
-| 企业微信/腾讯企业邮 | smtp.exmail.qq.com | 465 | true |
-
-#### 在 Docker 里启用邮件（在服务器上执行）
-
-要改的只有**服务器上与 `docker-compose.yml` 同目录的那份 `.env`**，Dockerfile / compose 都不用动
-（465 端口的 `MAIL_USE_SSL=true` 就是代码默认值）。环境变量**只在创建容器时注入**，所以改完必须
-**重建**——`docker compose restart` 不会重读 `.env`。
-
-> ⚠️ **凭据不进仓库**：`docker-compose.yml` / `.env.docker.example` 都会推送到 GitHub，所以里面
-> **不含**授权码（`MAIL_USERNAME` 已填、`MAIL_PASSWORD` 留空）。授权码只写在服务器那份 `.env`
-> （本地则是项目根目录的 `.env`，两者都被 `.gitignore` 忽略）。
->
-> ⚠️ 若服务器 `.env` 里已存在旧的 `MAIL_ENABLED=false` / `MAIL_HOST=smtp.example.com`，
-> 它们会覆盖 compose 的默认值导致发不出去，先清掉旧行再追加：
+环境变量只在创建容器时注入，改完必须**重建**（`restart` 不会重读 `.env`）：
 
 ```bash
-cd /opt/fastapi-admin                                  # docker-compose.yml 所在目录
+cd /opt/fastapi-admin
 sed -i '/^MAIL_/d' .env
 cat >> .env <<'EOF'
 MAIL_ENABLED=true
 MAIL_HOST=smtp.qq.com
 MAIL_PORT=465
 MAIL_USE_SSL=true
-MAIL_TIMEOUT=10
 MAIL_USERNAME=你的QQ邮箱@qq.com
 MAIL_PASSWORD=邮箱后台生成的SMTP授权码
 MAIL_FROM=你的QQ邮箱@qq.com
 EOF
-docker compose up -d --force-recreate --no-build backend   # 改 .env 后必须重建，restart 无效
+docker compose up -d --force-recreate --no-build backend
 docker exec admin-backend env | grep -i '^MAIL_'
 ```
 
-验证是否真的能发出（容器内直接调后端发信函数）：
+验证发信能力：
 
 ```bash
 docker exec admin-backend python -c "from app.core.mailer import send_mail, build_code_mail; s, h = build_code_mail('123456', 'register'); print('投递结果 =', send_mail('收件邮箱@example.com', s, h))"
 ```
 
-> **`MAIL_FROM` 必须与 `MAIL_USERNAME` 完全一致**：服务商会校验「信封发件人 == 登录账号」。
-> 另外 `${MAIL_FROM:-...}` 的 `:-` 在**值为空时也会取默认值**，旧版 compose 留空会变成
-> `noreply@example.com` 而被拒发（新版已写成 `${MAIL_FROM:-}`）。
->
-> `.env` 若在 Windows 上编辑过，先 `sed -i 's/\r$//' .env` 去掉 CRLF——值里带上 `\r` 会让解析异常。
-
 ---
 
 ## 七、接口清单
 
-统一前缀 `/api/v1`。除标注「公开」外，均需请求头 `Authorization: Bearer <access_token>`。
+统一前缀 `/api/v1`，共 **135 个端点**。除标注「公开」外均需 `Authorization: Bearer <access_token>`。
 
-### 认证 `/auth`
+> 权限三档：**公开**（匿名可访问）/ **登录**（任意有效令牌）/ **会员**（`scope=member`）/
+> **管理员**（`scope=staff` 且 `role=admin`）。
+
+### 后台认证 `/auth`
 
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
-| POST | `/auth/login` | JSON 登录，返回 access/refresh 令牌 | 公开 |
-| POST | `/auth/token` | OAuth2 表单登录（Swagger 调试用） | 公开 |
-| POST | `/auth/refresh` | 用 refresh_token 换新令牌 | 公开 |
-| GET | `/auth/me` | 当前登录用户信息 | 登录 |
+| POST | `/auth/login` | JSON 登录，返回 access / refresh | 公开 |
+| POST | `/auth/token` | OAuth2 表单登录（Swagger 用） | 公开 |
+| POST | `/auth/refresh` | 刷新令牌 | 公开 |
+| GET | `/auth/me` | 当前后台账号 | 登录 |
 | POST | `/auth/change-password` | 修改自己的密码 | 登录 |
-| POST | `/auth/logout` | 登出（前端清除令牌即可） | 登录 |
+| POST | `/auth/logout` | 登出（前端清令牌即可） | 登录 |
 
-### 用户 `/users`（全部需要管理员）
+### 后台账号 `/users`（管理员）
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/users` | 分页列表，支持 `page` `page_size` `keyword` `role` `is_active` |
-| POST | `/users` | 创建用户 |
-| GET | `/users/{id}` | 用户详情 |
-| PUT | `/users/{id}` | 更新用户（邮箱 / 昵称 / 角色 / 状态） |
-| PATCH | `/users/{id}/status` | 启用 / 禁用 |
-| PATCH | `/users/{id}/password` | 重置密码 |
-| DELETE | `/users/{id}` | 删除用户 |
+`GET /users`（分页 + `keyword` / `role` / `is_active`）、`POST /users`、`GET /users/{id}`、
+`PUT /users/{id}`、`PATCH /users/{id}/status`、`PATCH /users/{id}/password`、`DELETE /users/{id}`。
 
-> 内置保护：不能删除/禁用/降级「最后一个管理员」，不能禁用或删除当前登录账号。
+> 内置保护：不能删除 / 禁用 / 降级「最后一个管理员」，不能禁用或删除当前登录账号。
 
-### 用户中心（会员端）`/member`（无需后台权限）
+### 会员认证 `/member/auth`
 
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
-| POST | `/member/auth/send-code` | 发送邮箱验证码（`scene=register` / `reset_password`） | 公开 |
-| POST | `/member/auth/register` | 邮箱验证码注册（入参 `email` `code` `password` `confirm_password`），成功即完成邮箱验证，并**随机生成 10 位唯一会员编号**、自动生成默认昵称与默认头像 | 公开 |
-| POST | `/member/auth/login` | 邮箱 + 密码登录，返回 `scope=member` 令牌 | 公开 |
-| POST | `/member/auth/token` | OAuth2 表单登录（Swagger 调试用） | 公开 |
+| POST | `/member/auth/check-email` | 检查邮箱是否已注册 | 公开 |
+| POST | `/member/auth/send-code` | 发送验证码（`scene=register` / `reset_password`） | 公开 |
+| POST | `/member/auth/register` | 邮箱验证码注册（分配 10 位会员编号 + 默认昵称/头像） | 公开 |
+| POST | `/member/auth/login` | 邮箱 + 密码登录 | 公开 |
+| POST | `/member/auth/token` | OAuth2 表单登录（Swagger 用） | 公开 |
 | POST | `/member/auth/refresh` | 刷新会员令牌 | 公开 |
-| POST | `/member/auth/reset-password` | 忘记密码：入参 `email` `code` `new_password` `confirm_password` | 公开 |
+| POST | `/member/auth/verify-register-code` | 仅校验注册验证码，不消耗验证码 | 公开 |
+| POST | `/member/auth/verify-reset-code` | 仅校验重置密码验证码，不消耗验证码 | 公开 |
+| POST | `/member/auth/reset-password` | 忘记密码（验证码重置） | 公开 |
 | GET | `/member/auth/me` | 当前登录会员 | 会员 |
 | POST | `/member/auth/logout` | 退出登录 | 会员 |
-| GET | `/member/profile` | 查看我的资料（含 `avatar_url` / `background_url`：可直接用的图片地址） | 会员 |
-| PUT | `/member/profile` | 修改昵称 / 头像 / 背景图 / 性别 / 生日 / 手机号 / 简介 / 地区 | 会员 |
-| POST | `/member/profile/avatar` | 上传头像（multipart，≤5MB，jpg/png/webp/gif/heic/heif） | 会员 |
-| POST | `/member/profile/background` | 上传背景图（multipart，≤5MB，与头像同一套存放规则） | 会员 |
-| POST | `/member/send-code` | 已登录获取「修改密码」邮箱验证码（邮箱取当前账号，无需传参） | 会员 |
-| POST | `/member/profile/change-password` | 修改密码：入参 `code` `new_password` `confirm_password` | 会员 |
-| GET | `/members/{id}/public` | 会员**公开资料**（昵称 / 头像 `avatar_url` / 简介 / 地区 / 会员编号），动态作者主页用；不含邮箱手机号，被禁用按 404 | 公开 |
 
-### 文章（动态）收藏 `/posts`（用户侧）
-
-| 方法 | 路径 | 说明 | 权限 |
-| --- | --- | --- | --- |
-| GET | `/posts/favorites` | 我收藏的动态（按收藏时间倒序，只出已通过的） | 会员 |
-| POST | `/posts/{id}/favorite` | 收藏动态（幂等；只能收藏已通过的动态） | 会员 |
-| DELETE | `/posts/{id}/favorite` | 取消收藏（幂等，没收藏过也返回成功） | 会员 |
-
-动态出参 `PostOut` 里另有两个收藏字段：
-
-- `is_favorited`：**按查看者**算，带会员令牌时按该会员的收藏返回，未登录恒为 `false`；
-- `favorite_count`：全体会员的收藏总数，收藏 / 取消时同步返回最新值。
-
-`GET /posts/latest`、`GET /posts/by-member/{id}`、`GET /posts/favorites` 都会带上它们。
-
-### 会员管理（后台）`/members`（仅管理员）
+### 会员个人中心 `/member`
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/members` | 分页列表，支持 `keyword`（会员编号 / 邮箱 / 昵称 / 手机号）`gender` `is_active` `email_verified` `registered_after` `registered_before` |
-| GET | `/members/stats` | 会员统计（总数 / 启用 / 禁用 / 已验证 / 近 7 天新增 / 性别分布） |
-| GET | `/members/{id}` | 会员详情（含昵称、头像、背景图、性别、生日、年龄、手机号、简介、地区） |
-| PUT | `/members/{id}` | 修改会员资料（含地区）与启用状态 |
-| POST | `/members/{id}/avatar` | 代会员上传头像（multipart，≤5MB，与会员自助上传同一套存放规则） |
-| GET | `/members/{id}/avatar` | 按**会员 ID** 读取头像（图片流；未上传返回系统默认头像） |
-| POST | `/members/{id}/background` | 代会员上传背景图（multipart，≤5MB） |
-| GET | `/members/{id}/background` | 按**会员 ID** 读取背景图（图片流；没上传过 → 404） |
-| PATCH | `/members/{id}/status` | 启用 / 禁用（禁用后立即无法登录，已签发令牌同步失效） |
-| PATCH | `/members/{id}/password` | 重置会员密码 |
-| DELETE | `/members/{id}` | 删除会员 |
+| GET | `/member/profile` | 我的资料（含可直接用的 `avatar_url` / `background_url`） |
+| PUT | `/member/profile` | 改昵称 / 头像 / 背景图 / 性别 / 生日 / 手机号 / 简介 / 地区 |
+| POST | `/member/profile/avatar` | 上传头像（multipart，字段 `file`） |
+| POST | `/member/profile/background` | 上传背景图 |
+| POST | `/member/send-code` | 已登录时获取「修改密码」验证码（发到当前账号邮箱） |
+| POST | `/member/profile/change-password` | 修改密码（`code` + `new_password` + `confirm_password`） |
+
+### 会员公开资料与关注 `/members`
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| GET | `/members/{id}/public` | 公开资料（昵称 / 头像 / 简介 / 地区 / 会员编号），被禁用按 404 | 公开 |
+| GET | `/members/me/following` | 我关注的人（分页） | 会员 |
+| POST | `/members/{id}/follow` | 关注（幂等） | 会员 |
+| DELETE | `/members/{id}/follow` | 取消关注（幂等） | 会员 |
+
+### 会员管理（后台）`/members`（管理员）
+
+`GET /members`（`keyword` 支持会员编号 / 邮箱 / 昵称 / 手机号，另有 `gender` / `is_active` /
+`email_verified` / `registered_after` / `registered_before`）、`GET /members/stats`、
+`GET /members/{id}`、`PUT /members/{id}`、`PATCH /members/{id}/status`、
+`PATCH /members/{id}/password`、`DELETE /members/{id}`，以及媒体：
+`POST/GET /members/{id}/avatar`、`POST/GET /members/{id}/background`。
+
+### 动态与评论 `/posts` · `/comments`
+
+**用户端（`public_router`，部分需会员令牌）**
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| POST | `/posts` | 发动态（默认待审核） | 会员 |
+| PATCH | `/posts/{id}` | 修改被拒绝的动态并重新提交 | 会员 |
+| POST | `/posts/images` | 上传动态图片（multipart） | 会员 |
+| GET | `/posts/latest` | 最新已通过动态 | 公开 |
+| GET | `/posts/hot` | 热门（按访问量） | 公开 |
+| GET | `/posts/recommend` | 推荐（近一年随机 10 条） | 公开 |
+| GET | `/posts/recommend/page` | 推荐（分页） | 公开 |
+| GET | `/posts/following` | 关注流 | 会员 |
+| GET | `/posts/by-member/{member_id}` | 某会员的动态 | 公开 |
+| GET | `/posts/detail/{id}` | 详情（仅已通过，App 消息跳转用） | 公开 |
+| GET | `/posts/mine/{id}` | 我的一条动态（不限状态，改稿用） | 会员 |
+| POST | `/posts/{id}/view` | 记录一次访问 | 公开 |
+| POST/DELETE | `/posts/{id}/like` | 点赞 / 取消（幂等） | 会员 |
+| POST/DELETE | `/posts/{id}/favorite` | 收藏 / 取消（幂等） | 会员 |
+| GET | `/posts/favorites` | 我收藏的动态 | 会员 |
+| GET | `/posts/received-likes` | 我的获赞总数 | 会员 |
+| GET | `/posts/received-likes/posts` | 我获赞的动态列表 | 会员 |
+| GET | `/posts/received-comments` | 我的被评论总数 | 会员 |
+| GET | `/posts/commented-posts` | 我被评论的动态列表 | 会员 |
+| POST | `/posts/{id}/comments` | 发表评论（默认待审核） | 会员 |
+| GET | `/posts/{id}/comments` | 某动态下已通过评论 | 公开 |
+
+**后台（管理员）**
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/posts` | 动态列表（分页 + 筛选） |
+| GET | `/posts/{id}` | 动态详情 |
+| PATCH | `/posts/{id}/status` | 审核（`approved` / `rejected`，终态） |
+| DELETE | `/posts/{id}` | 删除动态 |
+| GET | `/comments` | 评论列表（分页 + 筛选） |
+| PATCH | `/comments/{id}/status` | 审核评论 |
+| DELETE | `/comments/{id}` | 删除评论 |
+
+### 官号文章 `/official-articles`
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| GET | `/official-articles` | 列表（`keyword` / `status` / `user_id` / `member_id` / `source`） | 管理员 |
+| POST | `/official-articles` | 发布 | 管理员 |
+| GET | `/official-articles/{id}` | 详情 | 管理员 |
+| PUT | `/official-articles/{id}` | 编辑 | 管理员 |
+| PATCH | `/official-articles/{id}/status` | 审核 | 管理员 |
+| DELETE | `/official-articles/{id}` | 删除 | 管理员 |
+| GET | `/official-articles/detail/{id}` | 公开详情（仅已通过） | 公开 |
+| POST | `/official-articles/{id}/view` | 记录访问量 | 公开 |
+
+> 官号文章的**点赞 / 收藏 / 评论**不单开接口，统一走 `/posts/{带偏移的 id}/...`，见第九节。
+
+### 站内消息 `/messages`
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/messages` | 消息列表（按类型筛选 + 分页） |
+| GET | `/messages/unread-count` | 未读数 |
+| POST | `/messages/{id}/read` | 单条已读 |
+| POST | `/messages/read-all` | 全部已读 |
+
+### 简历 `/resume`（管理员）
+
+六组前缀形状完全一致：`/resume/personal-infos`、`/resume/educations`、`/resume/work-experiences`、
+`/resume/projects`、`/resume/evaluations`、`/resume/skill-tags`，每组提供：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `<集合>` | 分页列表 + 搜索 |
+| POST | `<集合>` | 新增 |
+| GET | `<集合>/{id}` | 详情 |
+| PUT | `<集合>/{id}` | 更新 |
+| DELETE | `<集合>/{id}` | 删除 |
+| PATCH | `<集合>/{id}/status` | 启用 / 停用 |
+
+另有 `POST /resume/personal-infos/upload-avatar`（上传个人头像，返回 URL，不自动绑定）。
+
+### 个人网站对外 `/resume/public` · `/site`
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| GET | `/resume/public/profiles` | 整份简历（个人信息 + 教育 + 工作含项目 + 评价），只出启用数据 | 公开 |
+| GET | `/site/welcome` | 首页欢迎语（主标题 / 副标题 / 祝福语） | 公开 |
+| GET | `/site/about/access` | 「关于我」是否需要密码 | 公开 |
+| POST | `/site/about/verify` | 校验访问密码 | 公开 |
+| GET/PUT | `/site/admin/welcome` | 读取 / 更新欢迎语 | 管理员 |
+| GET/PUT | `/site/admin/about-password` | 查看 / 设置密码开关与新密码 | 管理员 |
 
 ### 系统 `/system`
 
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
 | GET | `/system/health` | 健康检查（含数据库探活） | 公开 |
-| GET | `/system/info` | 运行信息、数据库方言、各表行数 | 管理员 |
-| GET | `/system/dashboard` | 首页统计卡片数据 + 最近注册会员 | 登录 |
+| GET | `/system/info` | 运行信息、方言、各表行数 | 管理员 |
+| GET | `/system/dashboard` | 首页统计卡片 + 最近注册会员 | 登录 |
 
-### 静态资源 `/static`
+### 静态资源
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/v1/static/avatars/{会员ID}/{filename}` | 已上传的会员头像（由 `UPLOAD_DIR` 目录托管，按会员 ID 分目录） |
-| GET | `/api/v1/static/backgrounds/{会员ID}/{filename}` | 已上传的会员背景图（同样按会员 ID 分目录） |
+| 路径 | 说明 |
+| --- | --- |
+| `/api/v1/static/avatars/{会员ID}/{filename}` | 会员头像（`UPLOAD_DIR` 托管） |
+| `/api/v1/static/backgrounds/{会员ID}/{filename}` | 会员背景图 |
+| `/api/v1/static/posts/{filename}` | 动态图片（`posts/` 平铺） |
+| `/api/v1/static/resume-avatars/{filename}` | 简历个人头像（`resume-avatars/` 平铺） |
+| `/api/v1/assets/*` | 内置资源（`default-avatar.svg`） |
 
-> 挂在 API 前缀下，前端的 `/api` 代理与 Nginx 的 `/api` 反向代理可直接复用，无需额外配置静态资源规则。
-
-### 点菜菜单与订单（已下线）
-
-会员端 `/member/**` 仍保留；点菜 `/menu/**`、后台菜品管理、待办接口及其数据库表已全部移除，
-详见 [第九节](#九点菜菜单与订单体系已下线)。
+> 全部挂在 API 前缀下，前端 Vite 代理与 Nginx `/api` 反代可直接复用。
 
 ### 响应约定
 
-- 成功：直接返回数据体；分页接口返回 `{ items, total, page, page_size, pages }`。
-- 失败：统一返回 `{ "code": 40100, "message": "用户名或密码错误", "data": null }`，
-  并使用对应的 HTTP 状态码（400/401/403/404/409/422/500）。
+- 成功：直接返回数据体；分页统一 `{ items, total, page, page_size, pages }`。
+- 失败：`{ "code": 40100, "message": "…", "data": null }`，
+  配合 HTTP 状态码（400/401/403/404/409/422/500）。
 
 ---
 
-## 八、用户中心（会员体系）
+## 八、账号体系与认证
 
-### 8.1 为什么单独建一张 `member_account_info` 表
+### 8.1 两张账号表
 
-后台账号表（`system_auth_admin_user`）是 **B 端**：由管理员创建、带角色权限、不能自助注册。
-用户中心面对的是 **C 端注册用户**，字段、生命周期、权限边界都不同，因此独立建模为 `member_account_info` 表：
-
-| 维度 | `system_auth_admin_user`（后台账号） | `member_account_info`（用户中心注册用户） |
+| 维度 | `system_auth_admin_user` | `member_account_info` |
 | --- | --- | --- |
-| 创建方式 | 管理员在后台创建 | 用户自助邮箱注册 |
+| 创建方式 | 管理员后台创建 | 邮箱自助注册 |
 | 登录账号 | 用户名 | 邮箱 |
-| 权限 | admin / editor / user | 无后台权限，仅能操作自己的资料 |
+| 权限 | admin / editor / user | 无后台权限，只能操作自己的资料 |
 | 令牌 `scope` | `staff` | `member` |
-| 头衔/资料 | 昵称、角色、启用状态 | 10 位会员编号、昵称、头像、背景图、性别、生日、手机号、简介、地区 |
+| 资料 | 昵称、角色、启用状态 | 10 位会员编号、昵称、头像、背景图、性别、生日、手机号、简介、地区 |
 
-**令牌隔离**：两个作用域的 JWT 互不通用。会员令牌访问 `/users`、`/members` 等后台接口会直接返回 401
-（错误码 40104「令牌使用范围不正确」），后台令牌访问 `/member/**` 同样被拒绝。
+**令牌隔离**：`app/core/security.py` 在 payload 里写入 `scope`，`app/api/deps.py` 提供
+`get_current_user`（staff）/ `get_current_member`（member）/ `get_current_admin`。
+会员令牌访问后台接口返回 40104「令牌使用范围不正确」，反之亦然；会员被禁用后已签发令牌立即失效。
 
-### 8.2 完整流程
+### 8.2 注册与找回密码流程
 
 ```
 ① 注册
-   前端  ──POST /member/auth/send-code {email, scene:"register"}──▶  校验邮箱未被注册 → 生成 6 位码 → 发信
-   前端  ──POST /member/auth/register  {email, code, password, confirm_password}──▶
-                                      校验两次密码一致 → 校验验证码 → 创建会员（email_verified=true）
-                                                                  └ 随机生成 10 位唯一会员编号（member_no）
-                                                                  └ 自动生成默认昵称 + 写入默认头像
+  POST /member/auth/send-code      {email, scene:"register"}
+  POST /member/auth/register       {email, code, password, confirm_password}
+                                     ├ 邮箱验证标记为已验证
+                                     ├ secrets 生成 10 位唯一 member_no（范围 1000000000-9999999999）
+                                     └ 默认昵称 + 默认头像
 
 ② 登录
-   前端  ──POST /member/auth/login {email, password}──▶  access_token + refresh_token（scope=member）
+  POST /member/auth/login          {email, password} → access / refresh（scope=member）
 
 ③ 完善资料
-   PUT  /member/profile            昵称 / 头像地址 / 背景图地址 / 性别 / 生日 / 手机号 / 简介 / 地区
-   POST /member/profile/avatar     上传头像 → 返回可访问 URL 并自动写入头像字段
-   POST /member/profile/background 上传背景图 → 返回 URL 并写入背景图字段（同头像规则）
-   GET  /member/profile            出参 avatar_url / background_url = 可直接用的图片地址
+  PUT  /member/profile             文本字段
+  POST /member/profile/avatar      返回 URL 并自动写入头像字段
+  POST /member/profile/background  同上
 
 ④ 忘记密码（未登录）
-   POST /member/auth/send-code      {email, scene:"reset_password"}  要求邮箱已注册
-   POST /member/auth/reset-password {email, code, new_password, confirm_password}  两次密码一致才更新
+  POST /member/auth/send-code      {email, scene:"reset_password"}
+  POST /member/auth/reset-password {email, code, new_password, confirm_password}
 
 ⑤ 修改密码（已登录）
-   POST /member/send-code                    带会员令牌 → 向当前账号邮箱发码（scene=change_password）
-   POST /member/profile/change-password       {code, new_password, confirm_password}
-                                              校验验证码 → 校验两次密码一致 → 更新密码（验证码一次性）
-                                              └ 新密码不能与当前密码相同
+  POST /member/send-code           发到当前账号邮箱（scene=change_password）
+  POST /member/profile/change-password
 ```
 
-**会员编号（`member_no`）**
-
-注册成功时自动分配一个 **10 位纯数字**的会员编号，作为对外展示的短 ID（`member_account_info.id` 那种自增主键
-不适合直接给用户看，也不适合作为业务标识）。规则：
-
-| 项 | 说明 |
-| --- | --- |
-| 长度与范围 | 固定 10 位、首位不为 0，取值区间 `1000000000-9999999999`（90 亿种）；早期注册的老用户仍是 6 位，不做回溯 |
-| 生成方式 | `secrets.randbelow`（`app/core/utils.generate_member_no`），非伪随机 |
-| 唯一性 | 生成时先查重、重试最多 10 次；`member_account_info.member_no` 上还有**唯一索引**兜底，绝不重复 |
-| 可检索 | 后台 `GET /members?keyword=<编号>` 可按编号精确查找 |
-| 不可修改 | 由系统生成，资料编辑接口（会员端 / 后台）都不接受该字段 |
-
-> 为什么不用主键 `id` 充当 10 位 ID：`article_official_info.member_id` 等外键依赖自增主键，
-> 改成随机会丢掉有序性、破坏外键语义，且写入时需要处理冲突。新增独立的业务编号是更稳妥的做法。
-
-### 8.3 邮箱验证码机制
+### 8.3 验证码机制
 
 | 机制 | 说明 |
 | --- | --- |
-| 生成 | 使用 `secrets.randbelow` 生成，非伪随机数 |
-| 有效期 | 默认 10 分钟（`EMAIL_CODE_EXPIRE_MINUTES`） |
-| 重发冷却 | 默认 60 秒（`EMAIL_CODE_RESEND_SECONDS`），避免刷接口 |
-| 失败次数 | 默认最多 5 次（`EMAIL_CODE_MAX_ATTEMPTS`），超出后该验证码作废 |
-| 一次性 | 校验通过立即标记 `used_at`，同一条码不能复用 |
-| 场景隔离 | 注册码不能用于重置密码（`scene` 字段区分） |
-| 业务校验 | 注册场景要求邮箱未注册，重置密码场景要求邮箱已注册 |
+| 生成 | `secrets.randbelow`，非伪随机 |
+| 有效期 | 10 分钟 |
+| 重发冷却 | 60 秒（同邮箱 + 场景） |
+| 失败上限 | 5 次，超出作废 |
+| 一次性 | 校验通过写 `used_at` |
+| 场景隔离 | 注册码不能用于重置密码 |
+| 本地调试 | `MAIL_ENABLED=false` 时打日志，`EMAIL_CODE_DEBUG_RETURN=true` 时响应带 `debug_code` |
 
-### 8.4 本地如何拿到验证码（不配置 SMTP）
+### 8.4 图片上传与地址解析
 
-默认 `MAIL_ENABLED=false`，邮件不会真实发出，验证码会：
+- **校验**：后缀白名单 + 大小上限 + 魔术字节，防改名可执行文件。
+- **HEIC / HEIF**：落盘前转 JPEG（`pillow-heif`），按 88/75/60 逐档降质量压到限制内，并纠正 EXIF 旋转。
+- **落盘**：一个会员一个目录，覆盖上传会清掉旧图，删除会员时整目录清理；已做路径穿越防护。
+- **地址**：`avatar_url` / `background_url` 由资料接口直接返回，前端不需要单独取图接口。
+  头像缺省回退 `DEFAULT_AVATAR`，背景图缺省为空串；文件名带随机串，重传后地址必变。
 
-1. 打印在服务端日志中：`[用户中心] 未真实发送邮件，验证码 -> email=xxx scene=register code=123456`；
-2. 若 `DEBUG=true` 且 `EMAIL_CODE_DEBUG_RETURN=true`，接口会直接把它回显在 `debug_code` 字段：
+### 8.5 演示数据
 
-```powershell
-curl.exe -X POST http://127.0.0.1:8000/api/v1/member/auth/send-code `
-  -H "Content-Type: application/json" `
-  -d '{\"email\":\"me@example.com\",\"scene\":\"register\"}'
-```
+`scripts/init_db.py` 在表为空时写入下表（密码统一 `members123`）：
 
-```json
-{
-  "email": "me@example.com",
-  "scene": "register",
-  "sent": false,
-  "expires_in": 600,
-  "resend_after": 60,
-  "debug_code": "123456"
-}
-```
-
-> **生产环境必须**：`MAIL_ENABLED=true` + `EMAIL_CODE_DEBUG_RETURN=false`。
-
-### 8.5 图片（头像 / 背景图）上传与读取
-
-**存**：头像 `POST /member/profile/avatar`、背景图 `POST /member/profile/background`
-（会员自助），后台代传是 `POST /members/{会员ID}/avatar` 与
-`POST /members/{会员ID}/background`；均为 `multipart/form-data`、字段名 `file`
-
-- 校验：后缀白名单 + 大小上限 + **魔术字节校验**（防止改名的可执行文件）
-- **iPhone 的 HEIC / HEIF**：后缀与识别都放行，但**落盘前一律转成 JPEG**
-  （`app/core/storage.py` 的 `heif_to_jpeg`，依赖 `pillow-heif`）—— 浏览器（后台
-  `<img>`）和 Flutter（App 的 `ft.Image`）都渲染不了 HEIC，直接存下来等于「传上去了
-  但哪儿都看不见」。转出的 JPEG 按 88/75/60 逐档降质量压到 5MB 以内，EXIF 旋转也会
-  一并纠正；转不了则报「HEIC 图片解析失败，请换一张或先转成 JPG」。
-- 落盘：**一个会员一个目录，目录名就是会员 ID**
-
-  ```
-  data/uploads/avatars/1/avatar_1_ab12cd34ef56.png
-  data/uploads/backgrounds/1/background_1_ab12cd34ef56.png
-  ```
-
-- 覆盖上传会清掉该会员目录里的旧图（目录里只留当前这一张）；删除会员时整个目录一起清
-- 路径穿越已做防护：解析出的文件必须位于 `UPLOAD_DIR` 之内
-
-**读**：**会员侧不再单独提供「获取图片」接口**，地址由资料接口一起返回
-
-| 出参字段 | 出现于 | 说明 |
-| --- | --- | --- |
-| `avatar_url` | `GET /member/profile`、`GET /member/auth/me`、`GET /members/{会员ID}` | 可直接当 `<img src>` 用的头像地址 |
-| `background_url` | 同上 | 可直接用的背景图地址；**没上传过时是空串** |
-
-两个地址都是**以会员 ID 为维度**解析出来的：先按库里存的 `avatar` / `background`
-反推磁盘路径（外部链接直接跳过），找不到再到对应目录（`avatars/{会员ID}/`、
-`backgrounds/{会员ID}/`）里取最后写入的那张。区别只有一点：
-
-- 头像**有默认值**：都没上传过时等于 `DEFAULT_AVATAR`（`app/static/default-avatar.svg`）；
-- 背景图**没有默认值**：没上传就是空串，前端按「不铺背景图」处理。
-
-因为文件名里带随机串，重新上传后地址一定会变，客户端不会读到缓存的旧图；
-后台另保留两个直接取图片流的接口（管理员令牌）：`GET /members/{会员ID}/avatar`
-（拿不到时回退默认头像）与 `GET /members/{会员ID}/background`（拿不到 → 404），
-响应都带 `Cache-Control: no-cache`。
-
-### 8.6 后台如何管理会员
-
-进入前端 `fastapi-admin-frontend` 的「用户列表」菜单（用户管理 ▸ 用户列表，仅 `admin` 角色可见）：
-
-- **查看**：列表支持 关键词（邮箱/昵称/手机号）、性别、启用状态、邮箱验证状态 组合筛选；
-  点「详情」查看完整资料（含年龄、验证时间、最后登录、注册时间）。
-- **修改**：点「编辑」可改昵称、头像地址、性别、生日、手机号、简介、地区与启用状态。
-  会员自助（`PUT /member/profile`）与后台代改（`PUT /members/{id}`）**可改字段一致**：
-  昵称 / 头像 / 性别 / 生日 / 手机号 / 简介 / 地区，均可选，**未传的字段保持原值**
-  （后台额外支持 `is_active`）。
-  注意：列表项也会带出这些可编辑字段，否则从列表点「编辑」原样保存会把没返回的字段清空。
-- **启用 / 禁用**：列表内开关一键切换。禁用后：无法登录，且**已签发的令牌立即失效**
-  （每次请求都会校验会员状态）。
-- **重置密码**：管理员直接设置新密码，无需邮箱验证码。
-- **删除**：二次确认后删除会员及其本地图片文件（头像与背景图目录一起清）。
-
-### 8.7 演示数据
-
-`python scripts/init_db.py` 会写入 3 个演示会员（表为空时才写入）：
-
-| 邮箱 | 昵称 | 性别 | 生日 | 地区 | 状态 | 密码 |
-| --- | --- | --- | --- | --- | --- | --- |
-| alice@example.com | Alice | 女 | 1996-05-20 | 上海 | 启用 | members123 |
-| bob@example.com | Bob | 男 | 1992-11-03 | 北京 | 启用 | members123 |
-| carol@example.com | Carol | 保密 | - | （未填） | 禁用 | members123 |
+| 邮箱 | 昵称 | 性别 | 生日 | 地区 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| alice@example.com | Alice | 女 | 1996-05-20 | 上海 | 启用 |
+| bob@example.com | Bob | 男 | 1992-11-03 | 北京 | 启用 |
+| carol@example.com | Carol | 保密 | - | - | 禁用 |
 
 ---
 
-## 九、点菜菜单与订单体系（已下线）
+## 九、内容体系（动态 / 官号文章 / 互动 / 消息）
 
-该模块已整体移除：后台「菜品管理」菜单、`/dishes`、`/dish-categories`、`/dish-tags`、
-`/dish-orders`、C 端 `/menu/**`、待办 `/countdowns` 与 `/member/countdowns` 均已删除。
+### 9.1 两种内容，一条流
 
-对应的 8 张表：
+动态存 `article_post_info`，官号文章存 `article_official_info`。为了 App 不必区分，
+`app/services/article_feed.py` 把文章映射成帖子出参：
 
-    dish_order_item
-    dish_order_info
-    dish_base_spec
-    dish_base_tag_relation
-    dish_base_info
-    dish_base_category
-    dish_base_tag
-    countdown_base_info
+- `kind = "article"` 标识来源，`article_id` / `article_url` / `article_source` / `publisher` 等附加字段；
+- `id = ARTICLE_ID_OFFSET(1_000_000_000) + article.id`，避免与帖子主键撞号；
+- 详情 / 访问量 / 点赞 / 收藏 / 评论**全部复用 `/posts/{id}/...`**，服务层用
+  `is_article_id()` 判断后路由到文章相关仓储；评论 id 同样带偏移；
+- `GET /posts/latest|hot|recommend|following|by-member` 与「我的获赞 / 被评论」都把两类内容合并排序。
 
-**不需要手工删库**：应用启动时 `init_db()` 会调用 `app/db/legacy_cleanup.py`
-的 `drop_legacy_tables()`，按白名单自动删除这些表（只删这 8 张，子表先于主表），
-所以「拉代码 → 重启服务」即可完成清理。删除不可恢复，需要保留数据时
-在 `.env` 里设 `DROP_LEGACY_TABLES=false`。
+### 9.2 审核规则
 
-Alembic 迁移 `4d2a8f6c1b90` 同样会删这 8 张表（可重复执行、表不存在则跳过），
-适合已经在用迁移管理结构的环境：
+- 动态与评论发布后为 `pending`，后台 `PATCH .../status` 改为 `approved` / `rejected`，**终态不可再改**。
+- 只有 `approved` 的内容对外可见；被拒绝的动态作者可 `PATCH /posts/{id}` 修改后重新提交。
+- 官号文章同样走 `pending → approved / rejected`。
 
-```powershell
-python -m alembic upgrade head
-```
+### 9.3 互动与消息
 
-## 十、数据库迁移：SQLite → PostgreSQL / MySQL
-
-### 10.1 三种可选方式
-
-| 方式 | 适用场景 | 说明 |
+| 互动 | 存储 | 约束 |
 | --- | --- | --- |
-| A. 仅改连接串 | 数据可丢弃的开发环境 | 改 `DATABASE_URL`，启动时自动建表 |
-| B. Alembic | 需要版本化的结构变更 | 见[第十一节](#十一数据库结构版本管理alembic) |
-| C. 迁移脚本 | **保留 SQLite 现有数据** | 见下方 10.3，本项目推荐生产使用 |
-| D. Docker 部署 | 后端容器 + 宿主机上另一个 PG 容器 | 见 [13.5 节](#135-docker-部署后端容器--宿主机上的另一个-pg-容器) |
+| 点赞 | `article_post_like` / `article_official_like` | 幂等，仅已通过内容 |
+| 收藏 | `article_post_favorite` / `article_official_favorite` | 幂等 |
+| 评论 | `article_post_comment` / `article_official_comment` | 默认待审核 |
+| 关注 | `member_account_follow` | 幂等，`GET /members/me/following` |
 
-### 10.2 第一步：安装驱动并创建目标库
+`member_account_message` 承载站内消息（`MessageType`：评论 / 点赞 / 关注 / 审核结果 / 公告），
+提供未读数、单条已读、全部已读。
 
-```powershell
-# PostgreSQL
-./.venv/Scripts/python.exe -m pip install "psycopg[binary]"
+---
 
-# MySQL
-./.venv/Scripts/python.exe -m pip install PyMySQL
+## 十、个人网站（简历 + 站点设置）
+
+### 10.1 六组简历数据
+
+| 集合 | 表 | 说明 |
+| --- | --- | --- |
+| `personal-infos` | `resume_base_personal_info` | 姓名、头像、性别、生日、手机号、邮箱、现居城市、求职意向、当前状态、工作年限、个人主页、备注 |
+| `educations` | `resume_base_education` | 绑定 `personal_info_id` |
+| `work-experiences` | `resume_base_work` | 绑定 `personal_info_id` |
+| `projects` | `resume_base_project` | **必须绑定公司经历**（`work_id`） |
+| `evaluations` | `resume_base_evaluation` | 绑定 `personal_info_id` |
+| `skill-tags` | `resume_base_skill_tag` | 一条 = 分类 + 多个标签，标签用分号分隔，后端去重规整 |
+
+每条记录都有 `is_active` + `sort`，对外接口按 `sort` 升序，只出「自身与各级父级都启用」的数据。
+
+### 10.2 对外合并接口
+
+`GET /resume/public/profiles?personal_info_id=&limit=` —— 一次返回整份简历：
+
+```json
+[
+  {
+    "personal_info": {},
+    "educations": [],
+    "work_experiences": [{ "projects": [] }],
+    "evaluations": [],
+    "skill_tags": []
+  }
+]
 ```
 
-在目标数据库中先建好空库（编码建议 `UTF8` / `utf8mb4`）：
+传 `personal_info_id` 只取一人（不存在或已停用返回 404），不传取所有启用中的人。
 
-```sql
--- PostgreSQL
-CREATE DATABASE admin_db ENCODING 'UTF8';
+### 10.3 站点设置
 
--- MySQL
-CREATE DATABASE admin_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
-```
+`site_setting` 是单例（`id=1`）：
 
-### 10.3 第二步：暴力迁移数据
+- 欢迎语三件套：`welcome_title` / `welcome_subtitle` / `welcome_blessing`；
+- 「关于我」密码：只存 bcrypt 哈希（`app/core/site_password.py`，先 SHA-256 预处理以支持中文长密码），
+  默认密码 `123456`，`about_password_text` 仅供后台回显。
 
-`scripts/migrate_database.py` 会：
+---
 
-1. 按 ORM 元数据在目标库创建全部表结构；
-2. 反射源库结构，按**外键依赖顺序**逐表读取数据；
-3. 自动跳过源库中不存在的列（兼容历史结构差异），分批（默认 500 条/批）写入；
-4. PostgreSQL 下自动重置自增序列，避免后续插入主键冲突；
-5. 迁移完成后逐表比对源库与目标库行数并输出报告。
+## 十一、数据库与结构演进
+
+### 11.1 启动时自动做的事
+
+`app/db/init_db.py` 按顺序执行（全部幂等）：
+
+1. `create_all()` 建出缺失的表；
+2. `drop_legacy_tables()` 删除下线功能遗留的 8 张表（`DROP_LEGACY_TABLES=false` 可关）：
+   `dish_order_item`、`dish_order_info`、`dish_base_spec`、`dish_base_tag_relation`、
+   `dish_base_info`、`dish_base_category`、`dish_base_tag`、`countdown_base_info`；
+3. `sync_missing_columns()` 补「模型有、库里没有」的列（只 `ADD COLUMN`）；
+4. `sync_column_types()` 放宽长度不足的字符串列（只放宽不放窄，如 `member_no` 6 → 10 位）；
+5. 写入初始管理员、演示会员、站点设置单例。
+
+因此**日常升级只需拉代码 + 重启（或重建镜像）**，不需要手工迁移命令。
+
+### 11.2 Alembic
+
+结构版本由 5 个迁移文件管理，连接串复用 `settings.DATABASE_URL`：
 
 ```powershell
-# PostgreSQL：把本地 SQLite 全量迁移过去
+./.venv/Scripts/python.exe -m alembic revision --autogenerate -m "xxx"
+./.venv/Scripts/python.exe -m alembic upgrade head
+./.venv/Scripts/python.exe -m alembic downgrade -1
+./.venv/Scripts/python.exe -m alembic -x db_url="postgresql+psycopg://..." upgrade head
+./.venv/Scripts/python.exe -m alembic upgrade head --sql
+```
+
+已有库第一次接入 Alembic（库里还没有 `alembic_version`）要先建基线：
+
+```powershell
+./.venv/Scripts/python.exe -m alembic revision --autogenerate -m "baseline"
+./.venv/Scripts/python.exe -m alembic stamp head
+```
+
+> 只有「不止于加列」的变更（改类型 / 删列 / 加约束 / 数据回填）才必须走 Alembic。
+
+### 11.3 迁移到 PostgreSQL / MySQL
+
+```powershell
+# 1. 装驱动
+./.venv/Scripts/python.exe -m pip install "psycopg[binary]"      # PG
+./.venv/Scripts/python.exe -m pip install PyMySQL                # MySQL
+
+# 2. 目标库先建空库，再迁移数据
 ./.venv/Scripts/python.exe scripts/migrate_database.py `
   --source "sqlite:///./data/app.db" `
   --target "postgresql+psycopg://postgres:postgres@127.0.0.1:5432/admin_db" `
   --create-tables --truncate
-
-# MySQL
-./.venv/Scripts/python.exe scripts/migrate_database.py `
-  --source "sqlite:///./data/app.db" `
-  --target "mysql+pymysql://root:root@127.0.0.1:3306/admin_db?charset=utf8mb4" `
-  --create-tables --truncate
-
-# 只迁移指定的表
-... --tables system_auth_admin_user,member_account_info,article_post_info
-
-# 只校验两个库行数是否一致，不写入任何数据
-./.venv/Scripts/python.exe scripts/migrate_database.py --target "<目标库URL>" --verify-only
 ```
 
-参数说明：
+脚本按外键顺序分批写入，自动跳过源库不存在的列，PostgreSQL 下重置自增序列，最后输出行数比对。
+参数：`--source` / `--target` / `--create-tables` / `--truncate` / `--tables` /
+`--batch-size`（默认 500）/ `--verify-only`。
 
-| 参数 | 说明 |
-| --- | --- |
-| `--source` | 源库 URL，默认 `sqlite:///./data/app.db` |
-| `--target` | 目标库 URL，不填则用 `.env` 的 `DATABASE_URL` |
-| `--create-tables` | 在目标库创建缺失的表 |
-| `--truncate` | 迁移前清空目标表（**会删除目标库现有数据**） |
-| `--tables` | 只迁移指定表，逗号分隔 |
-| `--batch-size` | 批量写入条数，默认 500 |
-| `--verify-only` | 只做行数校验 |
+改完 `.env` 的 `DATABASE_URL` 重启，用 `GET /api/v1/system/info` 的 `database_dialect` 确认。
 
-> ⚠️ `--truncate` 是破坏性操作，请在目标库确认无误后再执行；生产环境务必先备份。
+### 11.4 表命名规范
 
-### 10.4 第三步：切换应用连接
+`一级功能_二级功能_功能`，第三段常用 `info`（主表）/ `item`（明细）/ `relation`（关联表）：
 
-编辑 `.env`：
-
-```dotenv
-# PostgreSQL
-DATABASE_URL=postgresql+psycopg://postgres:postgres@127.0.0.1:5432/admin_db
-
-# 或 MySQL
-DATABASE_URL=mysql+pymysql://root:root@127.0.0.1:3306/admin_db?charset=utf8mb4
-```
-
-重启服务，检查 `GET /api/v1/system/info` 中的 `database_dialect` 是否为 `postgresql` / `mysql`。
-
-### 10.5 连接串格式速查
-
-| 数据库 | SQLAlchemy URL | 驱动包 |
+| 一级 | 二级 | 表 |
 | --- | --- | --- |
-| SQLite | `sqlite:///./data/app.db` | 内置 |
-| PostgreSQL | `postgresql+psycopg://user:pwd@host:5432/db` | `psycopg[binary]` |
-| MySQL / MariaDB | `mysql+pymysql://user:pwd@host:3306/db?charset=utf8mb4` | `PyMySQL` |
+| `system` | `auth` | `system_auth_admin_user` |
+| `member` | `account` | `member_account_info`、`member_account_follow`、`member_account_message`、`member_account_email_code` |
+| `article` | `post` | `article_post_info`、`article_post_like`、`article_post_favorite`、`article_post_comment` |
+| `article` | `official` | `article_official_info`、`article_official_like`、`article_official_favorite`、`article_official_comment` |
+| `resume` | `base` | `resume_base_personal_info`、`resume_base_education`、`resume_base_work`、`resume_base_project`、`resume_base_evaluation`、`resume_base_skill_tag` |
+| `site` | — | `site_setting` |
 
----
-
-## 十一、数据库结构版本管理（Alembic）
-
-连接串已复用 `settings.DATABASE_URL`，无需在 `alembic.ini` 中重复配置。
-
-```powershell
-# 1. 生成迁移脚本（对比 ORM 与当前数据库结构）
-./.venv/Scripts/python.exe -m alembic revision --autogenerate -m "init tables"
-
-# 2. 应用迁移到当前 DATABASE_URL 指向的库
-./.venv/Scripts/python.exe -m alembic upgrade head
-
-# 3. 回滚一个版本
-./.venv/Scripts/python.exe -m alembic downgrade -1
-
-# 4. 临时迁移到别的库（不改 .env）
-./.venv/Scripts/python.exe -m alembic -x db_url="postgresql+psycopg://..." upgrade head
-
-# 5. 只看 SQL 不执行
-./.venv/Scripts/python.exe -m alembic upgrade head --sql
-```
-
-**已有数据库第一次接入 Alembic 的正确姿势**
-
-项目默认用 `Base.metadata.create_all()`（`scripts/init_db.py` / 应用启动时）建表，
-此时数据库里还没有 `alembic_version`。若直接 `--autogenerate`，因为表结构已经一致，
-会生成一份**空迁移**。推荐的基线流程：
-
-```powershell
-# 1. 生成一份（很可能是空的）基线迁移
-./.venv/Scripts/python.exe -m alembic revision --autogenerate -m "baseline"
-
-# 2. 把当前数据库标记为已处于该版本（不会真的执行 DDL）
-./.venv/Scripts/python.exe -m alembic stamp head
-
-# 3. 之后每次修改 ORM 模型，再生成真正的增量迁移
-./.venv/Scripts/python.exe -m alembic revision --autogenerate -m "add xxx column"
-./.venv/Scripts/python.exe -m alembic upgrade head
-```
-
-> 迁移到 PostgreSQL / MySQL 后，如果目标库的表是迁移脚本（10.3 节）创建的，
-> 同样先执行 `alembic stamp head` 建立基线，再继续做增量变更。
-
-### 11.1 删除模型后残留的旧表
-
-`create_all()` 与 Alembic 都**不会自动删除**已经被移除模型的表。
-例如早期版本的内容模块（`articles`）已下线，若你的数据库是在那之前创建的，
-可以按下面的方式清理这张不再使用的表：
-
-```powershell
-# SQLite（本地开发库）
-./.venv/Scripts/python.exe -c "import sqlite3; c=sqlite3.connect('data/app.db'); c.execute('DROP TABLE IF EXISTS articles'); c.commit(); c.close()"
-```
-
-```sql
--- PostgreSQL / MySQL
-DROP TABLE IF EXISTS articles;
-```
-
-> 不清理也不影响运行：ORM 已不再映射该表，`scripts/init_db.py` 与数据迁移脚本
-> 都只处理当前 `Base.metadata` 中的表。
-
-### 11.2 给已有表补充新列
-
-`create_all()` 同样**只建表、不改表**：新的模型字段不会自动加到已存在的表上。
-不过**单纯加列不需要你做任何事** —— `init_db()` 里的 `sync_missing_columns()`
-（`app/db/schema_sync.py`）会在每次启动时把「模型里已定义、库里还没有」的列自动补上
-（只 `ADD COLUMN`，带 `NOT NULL DEFAULT`，不动已有数据），所以
-`python scripts/init_db.py` / 重启服务 / `docker compose up -d --build` 之后就自动好了，
-补了哪些列在日志里能看到。
-
-只有**「不止于加列」的变更**才需要手工处理，两种方式二选一：
-
-```powershell
-# 方式一（推荐，可回溯）：用 Alembic 生成并执行增量迁移
-./.venv/Scripts/python.exe -m alembic revision --autogenerate -m "add dish_base_tag.is_active"
-./.venv/Scripts/python.exe -m alembic upgrade head
-```
-
-```sql
--- 方式二：手工执行等价的 DDL
-ALTER TABLE dish_base_tag ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1;   -- SQLite / PostgreSQL
-ALTER TABLE dish_base_tag ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1; -- MySQL
-```
-
-> 本地开发库已经补过这一列（`dish_base_tag.is_active`，历史数据默认启用）；
-> 全新的数据库由 `create_all()` 直接建出带该列的完整表，无需处理。
-
-**带唯一约束 / NOT NULL 的新列（如 `member_account_info.member_no`）**
-
-这类列不能只加 DDL 就完事：`NOT NULL + UNIQUE` 要求历史行都有值且互不重复，
-所以要「加列 → 回填 → 建唯一索引」三步走。SQLite 示例（其他库把索引语法替换即可）：
-
-```python
-# 1) 先加一个带默认值的普通列（SQLite 的 ADD COLUMN 不支持直接加 UNIQUE）
-ALTER TABLE member_account_info ADD COLUMN member_no VARCHAR(6) NOT NULL DEFAULT ''
-
-# 2) 逐行回填：用应用里的生成函数，保证 10 位且互不重复
-from app.core.utils import generate_member_no
-taken = set()
-for row_id, current in 查询所有 (id, member_no):
-    编号 = current if 合法且未占用 else 反复 generate_member_no() 直到未占用
-    UPDATE member_account_info SET member_no = 编号 WHERE id = row_id
-
-# 3) 补上唯一索引（名字与 SQLAlchemy unique=True + index=True 生成的一致）
-CREATE UNIQUE INDEX IF NOT EXISTS ix_member_account_info_member_no
-    ON member_account_info (member_no)
-```
-
-> 本地开发库已完成上述三步（历史用户均已回填唯一编号）；全新数据库由
-> `create_all()` 直接建出 `member_no` 唯一列，无需处理。
-
-### 11.3 表命名规范与改名
-
-**规范：`一级功能_二级功能_功能`** —— 三段拼起来必须能完整说明这张表是什么，
-禁止出现只有一两段的名字（如早期的 `user`、`dishes`）。
-
-| 一级功能 | 二级功能 | 含义 | 现有表 |
-| --- | --- | --- | --- |
-| `system` | `auth` | 系统 · 认证 | `system_auth_admin_user` |
-| `member` | `account` | 用户中心 · 账号 | `member_account_info`、`member_account_email_code` |
-| `dish` | `base` | 菜品 · 基础数据 | `dish_base_info`、`dish_base_category`、`dish_base_tag`、`dish_base_spec`、`dish_base_tag_relation` |
-| `dish` | `order` | 菜品 · 订单 | `dish_order_info`、`dish_order_item` |
-
-第三段的常用后缀语义：
-
-| 后缀 | 含义 | 示例 |
-| --- | --- | --- |
-| `info` | 主表（实体本体） | `dish_base_info`、`dish_order_info` |
-| `item` | 子表 / 明细 | `dish_order_item` |
-| `relation` | 多对多关联中间表 | `dish_base_tag_relation` |
-| `email_code` | 邮箱验证码 | `member_account_email_code` |
-
-> 新增表时必须遵循该规范；模型的 `__tablename__`、文件头注释、本 README 的目录树要一起更新。
-
-**给老库改名时的注意点**（表名只影响数据库，API 路径如 `/users`、`/members` 保持不变）：
-
-| 事项 | 说明 |
-| --- | --- |
-| 表本身 | `ALTER TABLE 旧名 RENAME TO 新名;`（SQLite / PostgreSQL / MySQL 均支持） |
-| 外键 | SQLite 与 PostgreSQL 的 `RENAME` 会**自动改写**其它表中指向该表的外键（如 `dish_order_info.member_id`），无需手工处理；MySQL 需自行核对 |
-| 索引名 | SQLAlchemy 的自动索引名跟着表名走（`ix_dishes_name` → `ix_dish_base_info_name`）。`create_all()` **不会**给已存在的表补索引，需按「列组合 + 唯一性」比对 metadata 后 DROP + CREATE 一遍 |
-| 保留字 | 表名尽量避开保留字；`user` 在 PostgreSQL 中是保留字，若非要使用，手写 SQL 必须写成 `"user"`（ORM 侧 SQLAlchemy 会自动加引号） |
-
-> 本地开发库已完成改名（10 张表 + 全部索引名 + 外键），详见 `data/app.db`。
+新增模型必须同时在 `app/models/__init__.py` 导出，否则 `Base.metadata` 不会注册该表。
 
 ---
 
 ## 十二、测试
 
 ```powershell
-./.venv/Scripts/python.exe -m pytest            # 运行全部用例
-./.venv/Scripts/python.exe -m pytest -v         # 详细输出
-./.venv/Scripts/python.exe -m pytest tests/test_member.py -v   # 只跑用户中心
-./.venv/Scripts/python.exe -m pytest tests/test_dish.py -v     # 只跑点菜菜单与订单
+./.venv/Scripts/python.exe -m pytest                 # 全部
+./.venv/Scripts/python.exe -m pytest -v              # 详细
+./.venv/Scripts/python.exe -m pytest tests/test_resume.py -v
 ```
 
-测试使用内存 SQLite（`sqlite:///:memory:`），不会污染 `data/app.db`；
-头像写入系统临时目录，验证码不发真实邮件。
+测试使用内存 SQLite，上传写入系统临时目录，验证码不发真实邮件。
 
 | 测试文件 | 覆盖点 |
 | --- | --- |
-| `tests/test_api.py` | 健康检查、后台登录成功/失败、令牌校验、后台用户增删改查 |
-| `tests/test_storage.py` | 图片魔术字节识别（含 **HEIC / HEIF**）、HEIC → JPEG 转码（产物必须是真 JPEG）、坏文件要报业务错误 |
-| `tests/test_schema_sync.py` | 启动时自动补列：老库缺列能被补上且**旧数据不丢**、缺多列、结构已一致时不出 DDL（幂等）、空库跳过、NOT NULL 列造不出默认值时退化成可空列 |
-| `tests/test_member.py` | 验证码场景校验与冷却、注册（重复/错误码/弱密码）、**10 位会员编号（格式 / 唯一性 / 后台检索）**、会员登录与刷新、令牌作用域隔离、资料修改（**昵称 / 简介 / 性别 / 生日 / 地区一次改完，未传字段保持原值**；含**地区**字段）、**后台改同样字段**、**列表项带出可编辑字段（编辑保存不丢简介/手机号）**、**头像按会员 ID 分目录存放、并由资料接口 avatar_url 带出**（含未上传时回退默认头像）、头像上传（含非法文件）、**后台代传头像与按 ID 读取**、**背景图按会员 ID 分目录存放、由 background_url 带出（含覆盖上传只留一张、后台代传与按 ID 读取）**、**后台编辑地区字段**、修改密码、验证码重置密码、后台会员管理全流程 |
-| `tests/test_dish.py` | 分类/标签 CRUD、标签启用状态（`only_active` 过滤与 C 端隐藏）、菜品与套餐增删改、图片上传、点菜菜单浏览、下单（无套餐/有套餐）、库存与销量联动、起购/限购/每日限量/供应时段校验、取消订单回滚、后台订单状态流转、会员与管理员权限隔离 |
+| `test_api.py` | 健康检查、后台登录、令牌校验、后台账号 CRUD |
+| `test_member.py` | 会员资料、后台会员管理、头像 / 背景图、地区字段、令牌隔离 |
+| `test_member_auth.py` / `test_member_register_code.py` / `test_member_reset_code.py` | 注册 / 登录 / 验证码场景与冷却 |
+| `test_email_code_service.py` | 验证码生成、限流、尝试次数 |
+| `test_member_follow.py` | 关注 / 取关 / 关注流 |
+| `test_post.py` / `test_post_comment.py` | 动态发布审核、点赞收藏、评论、获赞/被评论列表 |
+| `test_official_article.py` / `..._interaction.py` / `..._comment.py` / `..._feed.py` | 官号文章 CRUD、互动、与动态合流 |
+| `test_messages.py` | 消息生成、未读数、已读 |
+| `test_resume.py` / `test_resume_public.py` | 六组简历 CRUD、启停、对外合并接口 |
+| `test_site.py` | 欢迎语、关于我密码 |
+| `test_storage.py` | 魔术字节（含 HEIC）、HEIC → JPEG |
+| `test_schema_sync.py` | 自动补列、旧数据不丢、幂等 |
+| `test_legacy_cleanup.py` / `test_retired_features.py` | 下线表清理与已移除接口不再暴露 |
 
 ---
 
 ## 十三、生产部署
 
-四种方式，按需选择：**13.1 单机** → **13.2 Gunicorn** → **13.3 systemd 常驻** →
-**13.4 Nginx 反向代理** → **13.5 Docker（后端容器 + 独立 PG 容器）**。
-无论哪种方式，上线前都要：关闭 `DEBUG`、更换 `SECRET_KEY`、把 `DATABASE_URL` 指向正式库。
+上线前必须：`DEBUG=false`、`EMAIL_CODE_DEBUG_RETURN=false`、更换 `SECRET_KEY`、
+`DATABASE_URL` 指向正式库、`BACKEND_CORS_ORIGINS` 填真实前端域名。
 
-### 13.1 单机（Windows / Linux 通用）
+### 13.1 单机 / Gunicorn
 
 ```powershell
-# 必须：关闭 DEBUG、更换 SECRET_KEY、把 DATABASE_URL 指向正式库
 ./.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
-> `--workers` 与 SQLite 配合不佳，生产建议使用 PostgreSQL / MySQL。
-
-### 13.2 Linux + Gunicorn（推荐）
-
 ```bash
 pip install "uvicorn[standard]" gunicorn
-gunicorn app.main:app \
-  -k uvicorn.workers.UvicornWorker \
-  -w 4 -b 0.0.0.0:8000 \
+gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 4 -b 0.0.0.0:8000 \
   --access-logfile - --error-logfile -
 ```
 
-### 13.3 systemd 常驻
+> 多 worker 与 SQLite 配合不佳，生产建议 PG / MySQL。
+
+### 13.2 systemd
 
 ```ini
 # /etc/systemd/system/fastapi-admin.service
@@ -1013,7 +825,7 @@ WantedBy=multi-user.target
 sudo systemctl daemon-reload && sudo systemctl enable --now fastapi-admin
 ```
 
-### 13.4 Nginx 反向代理
+### 13.3 Nginx
 
 ```nginx
 server {
@@ -1028,7 +840,7 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # 可选：一起托管前端构建产物（前后端同域，可省去跨域配置）
+    # 可选：同域托管前端构建产物
     location / {
         root /var/www/admin;
         try_files $uri $uri/ /index.html;
@@ -1036,189 +848,74 @@ server {
 }
 ```
 
-### 13.5 Docker 部署（后端容器 + 宿主机上的另一个 PG 容器）
+### 13.4 Docker（后端容器 + 宿主机上的 PG 容器）
 
-目标形态：**只把后端放进容器，数据库用同宿主机上另一个已有的 PG 容器**
-（PG 不在本 compose 内，通过它的宿主机映射端口访问）；**镜像的构建上下文直接从 GitHub 拉取**，
-服务器上不需要放源码：
-
-```
-https://github.com/duzqiu/fastapi-admin-backend.git
-```
-
-| 文件 | 作用 |
-| --- | --- |
-| `Dockerfile` | 后端镜像：Python 3.13-slim + 依赖 + 非 root 用户 + 健康检查 |
-| `docker-compose.yml` | **只有 backend 一个服务**，`build.context` 指向 GitHub 仓库 |
-| `.env.docker.example` | compose 变量模板（`cp` 成 `.env`，用于覆盖 PG 连接信息与密钥） |
-
-#### 步骤 0（必须先做）：把 Dockerfile 推送到仓库
-
-`build.context` 是 Git 仓库时，**Dockerfile 必须存在于那个上下文里**，否则构建会直接报
-`failed to read dockerfile: ... Dockerfile: not found`。先在本地仓库提交并推送：
+`docker-compose.yml` 只有一个 backend 服务，`build.context` 指向 GitHub 仓库，
+服务器上不需要源码；`.env.docker.example` 是变量模板（`cp` 成 `.env`）。
 
 ```bash
-git add Dockerfile .dockerignore docker-compose.yml .env.docker.example .gitignore README.md
-git commit -m "add docker deployment"
-git push origin main
-```
-
-推送后 `docker compose up -d --build` 就会用**最新提交**作为构建上下文。
-要固定版本可以写 `context: https://github.com/duzqiu/fastapi-admin-backend.git#v1.0.0`（分支 / 标签 / 提交号都支持）。
-
-#### 步骤 1：确认 PG 容器信息、建好目标库
-
-```bash
-# 找到 PG 容器的名字、镜像与端口映射（关注 5452->5432 这一条）
-docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Ports}}"
-
-# 后端只建表、不建库，目标库要事先存在（库名与 .env 里的 PG_DB 保持一致）
+# 0) Dockerfile / compose / .env.docker.example / .dockerignore 必须先 push 到仓库
+# 1) 目标库要事先存在（后端只建表不建库）
 docker exec -it <PG容器名> psql -U postgres -c "CREATE DATABASE admin_db;"
-```
 
-#### 步骤 2：在服务器上准备 compose 与配置
-
-只需要 `docker-compose.yml` 和 `.env.docker.example` 两个文件，**不用把源码拷过去**：
-
-```bash
+# 2) 准备配置
 mkdir -p /opt/fastapi-admin && cd /opt/fastapi-admin
-# 从仓库取这两个文件（git clone 整个仓库、或单独下载这两个文件都行）
+cp .env.docker.example .env
 
-cp .env.docker.example .env      # 文件名必须是 .env，compose 才会自动读取
-```
-
-数据库相关的默认值已经按「PG 在宿主机、映射端口 5452、用户 postgres」填好，按实际改即可：
-
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `PG_HOST` | `host.docker.internal` | 容器里访问宿主机；**不要写 `127.0.0.1`**（那是容器自己） |
-| `PG_PORT` | `5452` | 宿主机映射出来的端口（PG 容器自身监听的是 5432） |
-| `PG_USER` / `PG_PASSWORD` | `postgres` / `123456` | 按你的实际账号改 |
-| `PG_DB` | `admin_db` | 目标库，必须已存在（步骤 1） |
-| `PYTHON_IMAGE` | `python:3.13-slim` | 基础镜像。网络受限时填**完整仓库地址**可绕过 daemon 里失效的加速器 |
-| `APT_MIRROR` | 空 | Debian 源镜像（装 tzdata 用），如 `https://mirrors.aliyun.com/debian` |
-| `PIP_INDEX_URL` | `https://mirrors.aliyun.com/pypi/simple/` | PyPI 源，默认阿里云；想换回官方源传 `https://pypi.org/simple`（必须是 https） |
-
-后端会用这些值拼出 `DATABASE_URL`：
-`postgresql+psycopg://postgres:123456@host.docker.internal:5452/admin_db`
-
-> 上线前还要改：`SECRET_KEY`（否则任何人都能伪造 JWT）、`BACKEND_CORS_ORIGINS`（前端实际地址）、
-> `FIRST_SUPERUSER_PASSWORD`；`DEBUG` 与 `EMAIL_CODE_DEBUG_RETURN` 保持 `false`。
-
-#### 步骤 3：构建并启动
-
-```bash
+# 3) 构建启动
 docker compose up -d --build
-docker compose ps
 docker compose logs -f backend
 curl http://127.0.0.1:8000/api/v1/system/health
 ```
 
-首次启动会自动建表、**自动补齐新版本新增的列**，再写入初始管理员
-（`scripts/init_db.py` 幂等，可重复执行）。如果 PG 还没起来，入口会失败退出，
-`restart: unless-stopped` 会自动重试。
+关键变量：`PG_HOST`（默认 `host.docker.internal`，**不要写 127.0.0.1**）、`PG_PORT`（默认 5452）、
+`PG_USER` / `PG_PASSWORD` / `PG_DB`、`PYTHON_IMAGE`、`APT_MIRROR`、`PIP_INDEX_URL`。
 
-> ✅ **更新版本只需 `docker compose up -d --build`，不需要任何手工迁移命令。**
-> 入口里的 `init_db()` 会先 `create_all()` 建缺失的表、再 `sync_missing_columns()`
-> 把模型里新增、库里还没有的列补上（只 `ADD COLUMN`，见 `app/db/schema_sync.py`），
-> 补了哪些列会写进日志，`docker compose logs backend` 里能直接看到。
->
-> 只有**「不止于加列」的变更**（改类型 / 删列 / 加约束 / 数据回填）才需要 Alembic：
-> `docker compose run --rm backend python -m alembic upgrade head`
-> （老库第一次接入见[第十一节](#十一数据库结构版本管理alembic)）。
+镜像入口：
 
-#### 步骤 4：把本地 SQLite 的数据迁到 PG
-
-应用启动只会**建表**，不会搬数据。PG 端口已映射到宿主机 `5452`，两种方式都行：
-
-```bash
-# 方式 A：在宿主机直接跑（需要有项目源码与虚拟环境；源库默认就是 ./data/app.db）
-./.venv/Scripts/python.exe scripts/migrate_database.py \
-  --target "postgresql+psycopg://postgres:123456@127.0.0.1:5452/admin_db" \
-  --create-tables --truncate
+```dockerfile
+CMD ["sh", "-c", "python scripts/init_db.py && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY:-2}"]
 ```
 
-```bash
-# 方式 B：在容器里跑（服务器上没有源码时用这个，把 SQLite 文件挂进去即可）
-docker compose run --rm \
-  -v "$(pwd)/data:/app/data" \
-  backend python scripts/migrate_database.py --create-tables --truncate
-```
-
-> Windows PowerShell 把 `$(pwd)` 换成 `${PWD}`。方式 B 里 `--target` 可省略，
-> 脚本会自动取容器内的 `DATABASE_URL`。
-
-说明：
-
-- 方式 A 用的是宿主机视角的 `127.0.0.1:5452`，方式 B 用的是容器视角的
-  `host.docker.internal:5452`，两者指向同一个 PG；
-- `--truncate` 会**按外键逆序**先清空目标表再写入（目标库已有播种数据时正是需要的）；
-- 脚本按外键顺序分批拷贝，并对 PostgreSQL 执行 `setval` **重置自增序列**，否则新记录会撞主键；
-- 想先确认两边行数是否一致：把 `--create-tables --truncate` 换成 `--verify-only`；
-- 跑完执行 `docker compose restart backend`。
-
-#### 步骤 5：常见坑
+**常见坑**
 
 | 现象 | 原因与处理 |
 | --- | --- |
-| 构建报 `Dockerfile not found` | 仓库里还没有 `Dockerfile`，先做步骤 0 |
-| 构建报拉取 / 认证失败 | 仓库是私有的，需要在 `build.context` 里带凭据或先 `docker login`；公开仓库无此问题 |
-| 输出 `backend Pulling` 然后报 `pull access denied` / `manifest unknown` | compose 把 `image: fastapi-admin-backend:1.0.0` 当成要从仓库拉的镜像了（该镜像只在本地构建产生）。本文件已加 `pull_policy: build` 明确「只构建、不拉取」；若仍出现，多半是手动执行了 `docker compose pull`（对纯构建服务没意义），或 `docker compose config` 里看不到 `build` 段（说明用的不是这份文件） |
-| 报 `Unsupported config option for services.backend: 'pull_policy'` | compose 版本过旧（v1 不支持 `pull_policy` / `name` / 远程 git 上下文），升级到 Compose v2：`docker compose version` |
-| 报 `failed to resolve source metadata for docker.io/library/python:3.13-slim: ... 403 Forbidden` / `401 Unauthorized` / 5xx | Docker daemon 里配的加速器（Registry Mirror）失效了 —— 报错 URL 里的域名就是它（如 `docker.xuanyuan.me`、`docker.fnnas.com`），`docker info` 可以看到全部加速器。公共加速器失效很频繁，**别跟着换加速器**，两条路更稳：① 删掉/换掉 `/etc/docker/daemon.json` 里的 `registry-mirrors`（删掉即直连 Docker Hub）后 `systemctl restart docker`；② 让构建绕过它：`.env` 里把 `PYTHON_IMAGE` 设成**完整仓库地址**，Docker 对带域名的完整地址不再走 docker.io 的加速器。候选地址与「先测再用」的 `docker pull` 循环见 `.env.docker.example` |
-| 装依赖时 `pip install` 超时 / SSL 报错 | 默认已用阿里云源（`https://mirrors.aliyun.com/pypi/simple/`）；若该源不可达，在 `.env` 里把 `PIP_INDEX_URL` 指向其它可达的 PyPI 源（必须是 https，如 `https://pypi.tuna.tsinghua.edu.cn/simple`、`https://pypi.org/simple`）；`apt-get update` 慢则设 `APT_MIRROR`（如 `https://mirrors.aliyun.com/debian`） |
-| 不支持 Git 作为构建上下文 | 需要 BuildKit（Docker 23+ / Compose v2 默认开启）：`DOCKER_BUILDKIT=1 docker compose build` |
-| 服务器拉不动 GitHub | 备选：在服务器上 `git clone` 仓库，把 compose 里的 `context` 改成 `.`（本地目录），效果一样 |
-| 连不上数据库（超时） | 主机名写成了 `127.0.0.1`。容器里要用 `host.docker.internal`；Linux 靠 compose 里的 `extra_hosts: host-gateway` 才能解析，容器里可执行 `python -c "import socket;print(socket.gethostbyname('host.docker.internal'))"` 验证 |
-| 报 `database "admin_db" does not exist` | 目标库没建，按步骤 1 先 `CREATE DATABASE` |
-| 报认证失败 / `password authentication failed` | `PG_USER` / `PG_PASSWORD` 与 PG 实际账号不一致 |
-| 后端容器启动即退出 | 入口 `scripts/init_db.py` 连不上库会失败退出；`restart: unless-stopped` 会自动重试，日志搜「数据库初始化失败」 |
-| 时段规则不对 | 容器默认 UTC，`TZ` 要设成 `Asia/Shanghai`（影响菜品「供应时段 / 每日限量」） |
-| 上传的图片想导出 | 已用命名卷 `uploads` 持久化：`docker cp admin-backend:/app/data/uploads ./` |
-| 改了 `.env` 不生效 | 变量只在创建容器时注入，需 `docker compose up -d --force-recreate` |
-| 更新到最新代码 | `docker compose up -d --build`（重新拉 GitHub 最新提交，数据卷不受影响）。新版本新增的列会在启动时**自动补上**，无需手工迁移 |
-| 启动 / 调接口报 `column member_account_info.background does not exist`（PG）或 `no such column`（SQLite） | 库比代码旧。正常情况启动时已自动补列；若仍出现，多半是「变更不止于加列」或库账号缺 DDL 权限，用 Alembic：`docker compose run --rm backend python -m alembic upgrade head`，再 `docker compose restart backend`；老库第一次接入见[第十一节](#十一数据库结构版本管理alembic) |
+| `Dockerfile not found` | 仓库里还没有 Dockerfile，先 push |
+| `pull access denied` / `manifest unknown` | 纯构建服务被当成拉取；compose 已加 `pull_policy: build` |
+| `Unsupported config option ... pull_policy` | Compose v1，升级到 v2 |
+| `failed to resolve source metadata ... 403` | Docker daemon 的 registry mirror 失效；删 `registry-mirrors` 或给 `PYTHON_IMAGE` 填完整仓库地址 |
+| `pip install` 超时 | 换 `PIP_INDEX_URL`；apt 慢则设 `APT_MIRROR` |
+| 连不上数据库 | 容器内不能用 `127.0.0.1`，用 `host.docker.internal`（Linux 需 compose 的 `extra_hosts: host-gateway`） |
+| `database "admin_db" does not exist` | 先建库 |
+| 改了 `.env` 不生效 | 变量只在创建容器时注入，需 `--force-recreate` |
+| 容器时区不对 | 设 `TZ=Asia/Shanghai` |
+| 上传图片想导出 | 命名卷 `uploads`：`docker cp admin-backend:/app/data/uploads ./` |
+| 报缺列 | 正常启动会自动补列；仍失败说明变更不止加列，跑 `alembic upgrade head` |
 
-> **更推荐的生产做法（不绕宿主机）**：把两个容器接到同一个自定义网络，用容器名 + 容器内端口直连：
->
-> ```bash
-> docker network create admin-net
-> docker network connect admin-net <PG容器名>       # 把已有 PG 接进来
-> ```
->
-> 然后 `.env` 里写 `PG_HOST=<PG容器名>`、`PG_PORT=5432`，并给 compose 的 backend 加上：
->
-> ```yaml
->     networks: [admin-net]
-> # 文件末尾
-> networks:
->   admin-net:
->     external: true
-> ```
->
-> 好处是不经过宿主机端口转发、少一层 NAT，且 PG 端口可以不对宿主机暴露。
-
-> 表名已统一成 `dish_base_* / dish_order_* / member_account_* / system_auth_admin_user`，
-> 不含 `user` 这类 PostgreSQL 保留字，建表与查询都不需要额外加双引号。
-> 全部 DDL 已用 PostgreSQL 方言预编译校验通过（`SERIAL` / `BOOLEAN` / `TIMESTAMP WITHOUT TIME ZONE` / 外键动作）。
+**更稳的网络接法**：把两个容器接到同一个自定义网络，用容器名 + 5432 直连，少一层 NAT。
 
 ---
 
-## 十四、与前端项目的对接
+## 十四、与客户端项目的对接
 
-- 前端项目：`fastapi-admin-frontend`（Vue 3 + Vite + Element Plus），**可独立部署**。
-- 通讯方式：仅 HTTP（REST + JSON），后端不渲染任何页面，前端不直连数据库。
-- 前端通过 `VITE_API_BASE_URL` 指向本服务的 `/api/v1`。
-- 跨域：如果前端与后端**不同域**，必须把前端访问地址加入 `.env` 的 `BACKEND_CORS_ORIGINS`：
+| 客户端 | 仓库 | 说明 |
+| --- | --- | --- |
+| 后台管理 | `fastapi-admin-frontend` | Vue 3 + Vite + Element Plus；`VITE_API_BASE_URL=/api/v1` |
+| 移动端 App | `flet-post-app` | Flet；默认 `http://fastapi.277686.xyz/api/v1`，App 内可改服务器地址 |
+
+- 通讯方式仅 HTTP（REST + JSON），后端不渲染页面，客户端不直连数据库。
+- 跨域：前后端不同域时，把前端地址加入 `BACKEND_CORS_ORIGINS`：
 
 ```dotenv
 BACKEND_CORS_ORIGINS=http://localhost:5173,https://admin.example.com
 ```
 
-- 认证：前端登录后把 `access_token` 存入本地，之后每个请求带
-  `Authorization: Bearer <token>`；收到 401 时用 `refresh_token` 调 `/auth/refresh`，
-  失败则跳回登录页。
-- 若前后端同域部署（Nginx 同时托管前端静态文件并反代 `/api`），则无需配置跨域。
+- 认证：登录后携带 `Authorization: Bearer <access_token>`；401 时用 `refresh_token`
+  调 `/auth/refresh` 续期，失败再跳登录页。
+- 上传文件与内置资源都在 `/api` 前缀下（`/api/v1/static`、`/api/v1/assets`），
+  同域反代一条规则即可覆盖。
+- 接口契约以 `/docs` 的 OpenAPI 文档为准。
 
 ---
 
@@ -1226,23 +923,13 @@ BACKEND_CORS_ORIGINS=http://localhost:5173,https://admin.example.com
 
 | 问题 | 排查方向 |
 | --- | --- |
-| 启动报 `database is locked` | SQLite 并发写限制，改用 PostgreSQL/MySQL |
-| 前端请求返回 403/被浏览器拦截 | `BACKEND_CORS_ORIGINS` 未包含前端域名 |
-| 401 且提示「登录状态已过期」 | access_token 过期，需用 refresh_token 刷新 |
-| 迁移后 PG 插入主键冲突 | 已自动 `setval` 重置序列；若手动插过数据需重跑 10.3 节 |
-| Docker 里连不上 PG | 容器里不能用 `127.0.0.1`（那是容器自己）；连宿主机上的 PG 用 `host.docker.internal` + 映射端口，或两容器共享自定义网络后用容器名 + 5432，见 13.5 |
-| Docker 里报数据库不存在 | 后端只建表不建库，需先 `CREATE DATABASE`，见 13.5 步骤 1 |
-| Docker 构建报 `Dockerfile not found` | `build.context` 指向 GitHub 时，Dockerfile 必须先推送到该仓库，见 13.5 步骤 0 |
-| Docker 里时段 / 每日限量判断错误 | 容器默认 UTC，需设置 `TZ=Asia/Shanghai` |
-| Docker 容器重启后上传的图片丢失 | 上传目录没挂 volume；compose 里已用命名卷 `uploads` 持久化 |
-| 密码校验 422 | 密码要求同时包含字母和数字，长度 6–64 |
-| 收不到注册验证码 | 未配置 SMTP 时不会真实发信：看响应 `debug_code`，或看服务端日志 `[用户中心] ... code=` |
-| 验证码提示「发送过于频繁」 | 同一邮箱 + 场景有 60 秒冷却，可用 `EMAIL_CODE_RESEND_SECONDS=0` 在本地关闭 |
-| 提示「令牌使用范围不正确」（40104） | 用了会员令牌访问后台接口（或反之），两套令牌不通用 |
-| 图片返回 404 | 确认 `UPLOAD_DIR` 目录存在且可写，并检查 Nginx/代理是否放行了 `/api/v1/static/` |
-| 生产环境验证码泄露 | 必须设置 `EMAIL_CODE_DEBUG_RETURN=false` 且 `DEBUG=false` |
-| 下单提示「需要选择套餐」 | 该菜品配置了套餐，必须传 `spec_id`；不需要套餐的菜品请勿传该字段 |
-| 下单提示「仅在 xx-xx 供应」 | 套餐配置了供应时段，按服务器本地时间判断；留空即为全天供应 |
-| 下单提示「今日限量…剩余 N 份」 | 套餐的 `daily_limit` 生效，`sold_today` 在每个本地自然日自动重置 |
-| 销售统计与 `sold_count` 不一致 | `sold_count` 是冗余计数；可按订单明细聚合后交叉校验 |
-| 取消订单后库存没回来 | 只有「待接单 / 已接单」可取消；「已完成」为终态，需要手工调整库存 |
+| 启动报 `database is locked` | SQLite 并发写限制，改用 PG / MySQL |
+| 前端请求被浏览器拦截 | `BACKEND_CORS_ORIGINS` 未包含前端域名（注意 localhost 与 127.0.0.1 要一致） |
+| 401「登录状态已过期」 | access_token 过期，用 refresh_token 刷新 |
+| 收不到注册验证码 | `MAIL_ENABLED=false` 时不会真实发信：看响应 `debug_code` 或日志 `[用户中心]` |
+| 提示「发送过于频繁」 | 同邮箱 + 场景 60 秒冷却，可设 `EMAIL_CODE_RESEND_SECONDS=0` 本地关闭 |
+| 提示「令牌使用范围不正确」（40104） | 会员令牌访问了后台接口，或反之 |
+| 图片 404 | 检查 `UPLOAD_DIR` 是否可写、Nginx 是否放行 `/api/v1/static/` |
+| 生产环境验证码泄露 | `EMAIL_CODE_DEBUG_RETURN=false` 且 `DEBUG=false` |
+| 密码校验 422 | 密码需 6–64 位且同时包含字母与数字 |
+| 迁移后 PG 主键冲突 | 脚本已 `setval`；若手工插过数据需重跑迁移 |
