@@ -34,7 +34,7 @@ class MessageService:
         from_member_id: Optional[int] = None,
         from_nickname: str = "",
     ) -> Optional[MemberMessage]:
-        """给某个会员写一条通知；收件人为空（匿名帖 / 未登录）时直接跳过。"""
+        """给某个会员写一条通知；收件人为空（匿名动态 / 未登录）时直接跳过。"""
         if not recipient_id:
             return None
 

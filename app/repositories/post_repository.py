@@ -19,13 +19,13 @@ from app.repositories.base import BaseRepository
 
 
 class PostRepository(BaseRepository[Post]):
-    """帖子数据访问对象。"""
+    """动态数据访问对象。"""
 
     def __init__(self, db: Session) -> None:
         super().__init__(Post, db)
 
     def post_no_taken(self, post_no: str) -> bool:
-        """判断帖子编号是否已被占用（发帖时用于生成不重复编号）。"""
+        """判断动态编号是否已被占用（发动态时用于生成不重复编号）。"""
         return self.exists(post_no=post_no)
 
     def search(
@@ -37,14 +37,14 @@ class PostRepository(BaseRepository[Post]):
         offset: int = 0,
         limit: int = 10,
     ) -> Tuple[List[Post], int]:
-        """按条件分页搜索帖子（按发布时间倒序，最新的在前）。"""
+        """按条件分页搜索动态（按发布时间倒序，最新的在前）。"""
         conditions: List[Any] = []
 
         if keyword:
             like = f"%{keyword.strip()}%"
             conditions.append(
                 or_(
-                    # 帖子 ID 也参与搜索：用户/客服报 12 位编号就能直接定位
+                    # 动态 ID 也参与搜索：用户/客服报 12 位编号就能直接定位
                     Post.post_no.like(like),
                     Post.title.like(like),
                     Post.content.like(like),
@@ -72,7 +72,7 @@ class PostRepository(BaseRepository[Post]):
         )
 
     def list_published(self, *, offset: int = 0, limit: int = 10) -> Tuple[List[Post], int]:
-        """所有「已通过」的帖子，按发布时间倒序（首页「最新」用）。"""
+        """所有「已通过」的动态，按发布时间倒序（首页「最新」用）。"""
         return self.list(
             conditions=[Post.status == PostStatus.APPROVED.value],
             order_by=(Post.published_at.desc(), Post.id.desc()),
@@ -83,7 +83,7 @@ class PostRepository(BaseRepository[Post]):
     def list_published_by_authors(
         self, author_ids: List[int], *, offset: int = 0, limit: int = 10
     ) -> Tuple[List[Post], int]:
-        """指定作者（我关注的人）已通过的帖子，按发布时间倒序。"""
+        """指定作者（我关注的人）已通过的动态，按发布时间倒序。"""
         if not author_ids:
             return [], 0
         return self.list(
@@ -97,7 +97,7 @@ class PostRepository(BaseRepository[Post]):
         )
 
     def list_hot(self, *, offset: int = 0, limit: int = 10) -> Tuple[List[Post], int]:
-        """所有「已通过」的帖子，按访问量倒序（访问量相同再按发布时间倒序）。"""
+        """所有「已通过」的动态，按访问量倒序（访问量相同再按发布时间倒序）。"""
         return self.list(
             conditions=[Post.status == PostStatus.APPROVED.value],
             order_by=(
@@ -112,7 +112,7 @@ class PostRepository(BaseRepository[Post]):
     def list_published_since(
         self, *, since: datetime, limit: int = 200
     ) -> List[Post]:
-        """某个时间点之后发布的「已通过」帖子（推荐随机抽取的候选集）。
+        """某个时间点之后发布的「已通过」动态（推荐随机抽取的候选集）。
 
         不做随机排序：`random()` / `rand()` 各家数据库写法不一样，
         这里按发布时间倒序取一批候选，交给服务层用 Python 随机抽样。
@@ -153,9 +153,9 @@ class PostRepository(BaseRepository[Post]):
         offset: int = 0,
         limit: int = 10,
     ) -> Tuple[List[Post], int]:
-        """会员自己的帖子（默认「已通过 + 已拒绝」），按发布时间倒序。
+        """会员自己的动态（默认「已通过 + 已拒绝」），按发布时间倒序。
 
-        已拒绝的也要出现在「我的帖子」里，用户才能看到状态、修改后重新提交。
+        已拒绝的也要出现在「我的动态」里，用户才能看到状态、修改后重新提交。
         """
         return self.list(
             conditions=[
@@ -169,17 +169,17 @@ class PostRepository(BaseRepository[Post]):
 
 
 class PostFavoriteRepository(BaseRepository[PostFavorite]):
-    """帖子收藏的数据访问对象：`会员 × 帖子` 的关系表。"""
+    """动态收藏的数据访问对象：`会员 × 动态` 的关系表。"""
 
     def __init__(self, db: Session) -> None:
         super().__init__(PostFavorite, db)
 
     def find(self, member_id: int, post_id: int) -> Optional[PostFavorite]:
-        """某会员对某帖子的收藏记录；没收藏返回 None。"""
+        """某会员对某动态的收藏记录；没收藏返回 None。"""
         return self.get_by(member_id=member_id, post_id=post_id)
 
     def favorited_post_ids(self, member_id: int, post_ids: list[int]) -> set[int]:
-        """这批帖子里，该会员收藏了哪些（列表页一次性标状态，避免逐条查）。"""
+        """这批动态里，该会员收藏了哪些（列表页一次性标状态，避免逐条查）。"""
         if not post_ids:
             return set()
         stmt = select(PostFavorite.post_id).where(
@@ -189,7 +189,7 @@ class PostFavoriteRepository(BaseRepository[PostFavorite]):
         return set(self.db.execute(stmt).scalars().all())
 
     def count_for(self, post_id: int) -> int:
-        """某条帖子被收藏了多少次。"""
+        """某条动态被收藏了多少次。"""
         stmt = (
             select(func.count())
             .select_from(PostFavorite)
@@ -216,9 +216,9 @@ class PostFavoriteRepository(BaseRepository[PostFavorite]):
         offset: int = 0,
         limit: int = 10,
     ) -> Tuple[List[Post], int]:
-        """该会员收藏的帖子，按收藏时间倒序（最近收藏的在前）。
+        """该会员收藏的动态，按收藏时间倒序（最近收藏的在前）。
 
-        只出指定状态的帖子：收藏后被拒 / 被删的内容不再出现在「我的收藏」里。
+        只出指定状态的动态：收藏后被拒 / 被删的内容不再出现在「我的收藏」里。
         """
         conditions = [
             PostFavorite.member_id == member_id,
@@ -246,7 +246,7 @@ class PostFavoriteRepository(BaseRepository[PostFavorite]):
 
 
 class PostCommentRepository(BaseRepository[PostComment]):
-    """帖子评论的数据访问对象。"""
+    """动态评论的数据访问对象。"""
 
     def __init__(self, db: Session) -> None:
         super().__init__(PostComment, db)
@@ -259,7 +259,7 @@ class PostCommentRepository(BaseRepository[PostComment]):
         offset: int = 0,
         limit: int = 20,
     ) -> Tuple[List[PostComment], int]:
-        """某条帖子下的评论（前台默认只出已通过的），最新的在前。"""
+        """某条动态下的评论（前台默认只出已通过的），最新的在前。"""
         return self.list(
             conditions=[
                 PostComment.post_id == post_id,
@@ -276,7 +276,7 @@ class PostCommentRepository(BaseRepository[PostComment]):
         *,
         statuses: Tuple[str, ...] = (CommentStatus.APPROVED.value,),
     ) -> dict[int, int]:
-        """批量取每条帖子的评论数（列表页用，避免逐条 count）。"""
+        """批量取每条动态的评论数（列表页用，避免逐条 count）。"""
         if not post_ids:
             return {}
         stmt = (
@@ -290,7 +290,7 @@ class PostCommentRepository(BaseRepository[PostComment]):
         return {row[0]: int(row[1]) for row in self.db.execute(stmt).all()}
 
     def count_received(self, member_id: int) -> int:
-        """某会员「收到」的已通过评论总数（他所有帖子合计）。"""
+        """某会员「收到」的已通过评论总数（他所有动态合计）。"""
         stmt = (
             select(func.count())
             .select_from(PostComment)
@@ -305,7 +305,7 @@ class PostCommentRepository(BaseRepository[PostComment]):
     def list_posts_with_comments(
         self, member_id: int, *, offset: int = 0, limit: int = 10
     ) -> Tuple[List[Post], int]:
-        """我发布的、收到过（已通过）评论的帖子，按评论数倒序。"""
+        """我发布的、收到过（已通过）评论的动态，按评论数倒序。"""
         comment_count = (
             select(func.count(PostComment.id))
             .where(
@@ -338,11 +338,11 @@ class PostCommentRepository(BaseRepository[PostComment]):
         offset: int = 0,
         limit: int = 10,
     ) -> Tuple[List[PostComment], int]:
-        """后台评论列表：按内容 / 评论人 / 帖子编号搜索，可按状态与帖子筛选。"""
+        """后台评论列表：按内容 / 评论人 / 动态编号搜索，可按状态与动态筛选。"""
         conditions: List[Any] = []
         if keyword:
             like = f"%{keyword.strip()}%"
-            # 关键字同时匹配：评论内容 / 评论人（快照 + 当前昵称）/ 帖子编号
+            # 关键字同时匹配：评论内容 / 评论人（快照 + 当前昵称）/ 动态编号
             conditions.append(
                 or_(
                     PostComment.content.like(like),
@@ -365,17 +365,17 @@ class PostCommentRepository(BaseRepository[PostComment]):
 
 
 class PostLikeRepository(BaseRepository[PostLike]):
-    """帖子点赞的数据访问对象：`会员 × 帖子` 的关系表。"""
+    """动态点赞的数据访问对象：`会员 × 动态` 的关系表。"""
 
     def __init__(self, db: Session) -> None:
         super().__init__(PostLike, db)
 
     def find(self, member_id: int, post_id: int) -> Optional[PostLike]:
-        """某会员对某帖子的点赞记录；没点过返回 None。"""
+        """某会员对某动态的点赞记录；没点过返回 None。"""
         return self.get_by(member_id=member_id, post_id=post_id)
 
     def liked_post_ids(self, member_id: int, post_ids: list[int]) -> set[int]:
-        """这批帖子里，该会员点过赞的（列表页一次性标状态）。"""
+        """这批动态里，该会员点过赞的（列表页一次性标状态）。"""
         if not post_ids:
             return set()
         stmt = select(PostLike.post_id).where(
@@ -385,7 +385,7 @@ class PostLikeRepository(BaseRepository[PostLike]):
         return set(self.db.execute(stmt).scalars().all())
 
     def count_for(self, post_id: int) -> int:
-        """某条帖子被点了多少个赞。"""
+        """某条动态被点了多少个赞。"""
         stmt = (
             select(func.count())
             .select_from(PostLike)
@@ -407,9 +407,9 @@ class PostLikeRepository(BaseRepository[PostLike]):
     def list_posts_with_received_likes(
         self, member_id: int, *, offset: int = 0, limit: int = 10
     ) -> Tuple[List[Post], int]:
-        """某会员「被点赞过」的帖子：自己发布的、至少收到一个赞的，按获赞数倒序。
+        """某会员「被点赞过」的动态：自己发布的、至少收到一个赞的，按获赞数倒序。
 
-        用相关子查询算每条帖子的点赞数再排序，避免 GROUP BY 在不同数据库上的差异。
+        用相关子查询算每条动态的点赞数再排序，避免 GROUP BY 在不同数据库上的差异。
         """
         like_count = (
             select(func.count(PostLike.id))
@@ -432,9 +432,9 @@ class PostLikeRepository(BaseRepository[PostLike]):
         return items, total
 
     def count_received(self, member_id: int) -> int:
-        """某会员「收到」的赞总数：他自己所有帖子被点赞的次数合计。
+        """某会员「收到」的赞总数：他自己所有动态被点赞的次数合计。
 
-        不看帖子状态：待审核 / 已拒绝的帖子也可能被别人点过赞，一并算进去。
+        不看动态状态：待审核 / 已拒绝的动态也可能被别人点过赞，一并算进去。
         """
         stmt = (
             select(func.count())

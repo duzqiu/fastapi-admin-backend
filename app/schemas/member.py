@@ -242,7 +242,7 @@ class MemberOut(ORMBaseModel):
 
 
 class MemberPublicOut(ORMBaseModel):
-    """会员公开资料（他人可见，帖子作者主页用）。
+    """会员公开资料（他人可见，动态作者主页用）。
 
     只出展示需要的字段：邮箱 / 手机号 / 生日等隐私一律不返回。
     """

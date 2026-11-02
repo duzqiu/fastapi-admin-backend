@@ -1,7 +1,7 @@
-"""文章管理（帖子）测试：用户发帖默认待审核、后台筛选与审核。
+"""文章管理（动态）测试：用户发动态默认待审核、后台筛选与审核。
 
 覆盖点：
-- 发帖一律进「待审核」，出参带发布人 / 标题 / 正文 / 图片 / 发布时间；
+- 发动态一律进「待审核」，出参带发布人 / 标题 / 正文 / 图片 / 发布时间；
 - 后台列表需要管理员身份，支持状态与关键词筛选；
 - 审核只能改为「已通过」或「已拒绝」，允许改判；
 - 详情 / 删除。
@@ -44,7 +44,7 @@ def _register_member(client) -> tuple[int, dict]:
 def create_post(client, **overrides) -> dict:
     payload = {
         "publisher": "测试发布人",
-        "title": "测试帖子标题",
+        "title": "测试动态标题",
         "content": "这是正文内容",
         "images": ["/api/v1/static/posts/a.png", "/api/v1/static/posts/b.png"],
     }
@@ -54,15 +54,15 @@ def create_post(client, **overrides) -> dict:
     return response.json()
 
 
-# ==================== 用户发帖 ====================
+# ==================== 用户发动态 ====================
 def test_create_post_defaults_to_pending(client):
-    """发帖默认「待审核」，字段完整回显。"""
+    """发动态默认「待审核」，字段完整回显。"""
     body = create_post(client)
 
     assert body["status"] == "pending"
     assert body["status_text"] == "待审核"
     assert body["publisher"] == "测试发布人"
-    assert body["title"] == "测试帖子标题"
+    assert body["title"] == "测试动态标题"
     assert body["content"] == "这是正文内容"
     assert len(body["images"]) == 2
     assert body["published_at"]
@@ -76,14 +76,14 @@ def test_create_post_without_images(client):
 
 
 def test_create_post_generates_12_digit_post_no(client):
-    """帖子 ID 是 12 位随机数字，与自增主键相互独立。"""
+    """动态 ID 是 12 位随机数字，与自增主键相互独立。"""
     body = create_post(client)
     assert re.fullmatch(r"\d{12}", body["post_no"]), body["post_no"]
     assert body["post_no"] != str(body["id"])
 
 
 def test_post_no_is_unique(client):
-    """两次发帖的编号不会重复。"""
+    """两次发动态的编号不会重复。"""
     first = create_post(client)
     second = create_post(client)
     assert first["post_no"] != second["post_no"]
@@ -120,7 +120,7 @@ def test_upload_image_rejects_non_image(client):
 
 
 def test_create_post_with_uploaded_image(client):
-    """典型流程：先传图拿 url，再随发帖一起提交。"""
+    """典型流程：先传图拿 url，再随发动态一起提交。"""
     uploaded = client.post(
         f"{API}/images", files={"file": ("p.png", _PNG, "image/png")}
     ).json()
@@ -217,7 +217,7 @@ def test_latest_pagination(client, auth_headers):
 # ==================== 访问量 / 热门 ====================
 def test_view_count_increases_on_each_view(client, auth_headers):
     """每次调 /view，访问量 +1，出参带最新值。"""
-    post = create_post(client, title="访问量-帖子")
+    post = create_post(client, title="访问量-动态")
     client.patch(
         f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
     )
@@ -236,7 +236,7 @@ def test_view_count_increases_on_each_view(client, auth_headers):
 
 
 def test_view_count_404_for_missing_post(client):
-    """不存在的帖子不能计数。"""
+    """不存在的动态不能计数。"""
     assert client.post(f"{API}/999999/view").status_code == 404
 
 
@@ -283,7 +283,7 @@ def test_hot_pagination(client, auth_headers):
 
 # ==================== 推荐（近一年随机 10 条）====================
 def test_recommend_only_recent_approved(client, auth_headers):
-    """推荐只出近一年内已通过的帖子。"""
+    """推荐只出近一年内已通过的动态。"""
     recent = create_post(
         client, title="推荐-近期", published_at="2026-10-01T00:00:00"
     )
@@ -326,7 +326,7 @@ def test_recommend_at_most_10_without_duplicates(client, auth_headers):
 def test_like_and_unlike_post(client, auth_headers):
     """点赞 / 取消点赞：计数与 is_liked 回显，重复点赞幂等。"""
     member_id, member = _register_member(client)
-    post = client.post(API, headers=member, json={"title": "点赞-帖子"}).json()
+    post = client.post(API, headers=member, json={"title": "点赞-动态"}).json()
     client.patch(
         f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
     )
@@ -348,14 +348,14 @@ def test_like_and_unlike_post(client, auth_headers):
 
 
 def test_like_only_approved_post(client, auth_headers):
-    """待审核 / 已拒绝的帖子不能点赞。"""
+    """待审核 / 已拒绝的动态不能点赞。"""
     member_id, member = _register_member(client)
     post = client.post(API, headers=member, json={"title": "待审不能赞"}).json()
     assert client.post(f"{API}/{post['id']}/like", headers=member).status_code == 400
 
 
 def test_received_likes_total(client, auth_headers):
-    """获赞总数 = 自己所有帖子收到的赞（含多篇帖子累加）。"""
+    """获赞总数 = 自己所有动态收到的赞（含多篇动态累加）。"""
     author_id, author = _register_member(client)
     fan_id, fan = _register_member(client)
 
@@ -373,7 +373,7 @@ def test_received_likes_total(client, auth_headers):
     assert body.status_code == 200, body.text
     assert body.json()["received_like_count"] == 2
 
-    # 只点赞别人的帖子：自己的获赞是 0
+    # 只点赞别人的动态：自己的获赞是 0
     assert (
         client.get(f"{API}/received-likes", headers=fan).json()["received_like_count"] == 0
     )
@@ -382,7 +382,7 @@ def test_received_likes_total(client, auth_headers):
 
 
 def test_received_like_posts_list(client, auth_headers):
-    """获赞列表：只出自己有赞的帖子，按获赞数倒序。"""
+    """获赞列表：只出自己有赞的动态，按获赞数倒序。"""
     author_id, author = _register_member(client)
     fan1_id, fan1 = _register_member(client)
     fan2_id, fan2 = _register_member(client)
@@ -408,7 +408,7 @@ def test_received_like_posts_list(client, auth_headers):
     assert data["items"][1]["like_count"] == 1
     assert "获赞列表-无人赞" not in titles
 
-    # 没发过帖 / 没收到赞的会员看到空列表
+    # 没发过动态 / 没收到赞的会员看到空列表
     assert client.get(f"{API}/received-likes/posts", headers=fan1).json()["total"] == 0
     # 未登录拿不到
     assert client.get(f"{API}/received-likes/posts").status_code == 401
@@ -417,7 +417,7 @@ def test_received_like_posts_list(client, auth_headers):
 def test_latest_carries_like_info(client, auth_headers):
     """列表出参带 like_count / is_liked（按查看者区分）。"""
     member_id, member = _register_member(client)
-    post = client.post(API, headers=member, json={"title": "带点赞数的帖子"}).json()
+    post = client.post(API, headers=member, json={"title": "带点赞数的动态"}).json()
     client.patch(
         f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
     )
@@ -433,16 +433,16 @@ def test_latest_carries_like_info(client, auth_headers):
     assert mine["is_liked"] is True
 
 
-# ==================== 按会员查已发布（C 端「我的帖子」）====================
+# ==================== 按会员查已发布（C 端「我的动态」）====================
 def test_member_posts_only_approved(client, auth_headers):
-    """只出审核通过的帖子，待审核的不出现。"""
+    """只出审核通过的动态，待审核的不出现。"""
     member_id, member = _register_member(client)
 
     approved = client.post(
-        API, headers=member, json={"title": "已通过的帖子", "content": "a"}
+        API, headers=member, json={"title": "已通过的动态", "content": "a"}
     ).json()
     pending = client.post(
-        API, headers=member, json={"title": "待审核的帖子", "content": "b"}
+        API, headers=member, json={"title": "待审核的动态", "content": "b"}
     ).json()
     client.patch(
         f"{API}/{approved['id']}/status", headers=auth_headers, json={"status": "approved"}
@@ -470,24 +470,24 @@ def test_member_posts_newest_first(client, auth_headers):
 
 
 def test_member_posts_isolated_between_members(client, auth_headers):
-    """别人的帖子不会混进来。"""
+    """别人的动态不会混进来。"""
     first_id, first = _register_member(client)
     second_id, second = _register_member(client)
 
-    mine = client.post(API, headers=first, json={"title": "第一个人的帖子"}).json()
-    client.post(API, headers=second, json={"title": "第二个人的帖子"})
+    mine = client.post(API, headers=first, json={"title": "第一个人的动态"}).json()
+    client.post(API, headers=second, json={"title": "第二个人的动态"})
     client.patch(
         f"{API}/{mine['id']}/status", headers=auth_headers, json={"status": "approved"}
     )
 
     body = client.get(f"{API}/by-member/{first_id}").json()
     assert body["total"] == 1
-    assert body["items"][0]["title"] == "第一个人的帖子"
+    assert body["items"][0]["title"] == "第一个人的动态"
     assert client.get(f"{API}/by-member/{second_id}").json()["total"] == 0
 
 
 def test_member_posts_include_rejected(client, auth_headers):
-    """「我的帖子」要能看到被拒绝的，并带回状态文案。"""
+    """「我的动态」要能看到被拒绝的，并带回状态文案。"""
     member_id, member = _register_member(client)
 
     approved = client.post(API, headers=member, json={"title": "通过的"}).json()
@@ -521,7 +521,7 @@ def test_member_posts_owner_sees_all_guest_sees_approved(client, auth_headers):
 
 # ==================== 发布者头像 ====================
 def test_anonymous_post_has_empty_publisher_avatar(client):
-    """匿名发帖没有发布会员，头像为空串。"""
+    """匿名发动态没有发布会员，头像为空串。"""
     body = create_post(client)
     assert body["publisher_avatar"] == ""
 
@@ -530,7 +530,7 @@ def test_post_returns_publisher_avatar(client, auth_headers):
     """列表 / 详情都带回发布者头像：取会员上传的那张，没上传时为空。"""
     member_id, member = _register_member(client)
 
-    post = client.post(API, headers=member, json={"title": "带头像的帖子"}).json()
+    post = client.post(API, headers=member, json={"title": "带头像的动态"}).json()
     # 还没上传过头像：默认头像是 svg，客户端渲染不了，这里给空串让前端退回首字头像
     assert post["publisher_avatar"] == ""
 
@@ -561,7 +561,7 @@ def test_post_returns_publisher_avatar(client, auth_headers):
 
 
 def test_resubmit_rejected_post(client, auth_headers):
-    """被拒绝的帖子：作者改完重新提交 → 回到待审核。"""
+    """被拒绝的动态：作者改完重新提交 → 回到待审核。"""
     member_id, member = _register_member(client)
     post = client.post(API, headers=member, json={"title": "旧标题", "content": "旧正文"}).json()
     client.patch(f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "rejected"})
@@ -612,11 +612,11 @@ def test_resubmit_after_reject_can_be_audited_again(client, auth_headers):
 
 
 def test_resubmit_requires_owner(client, auth_headers):
-    """别人的帖子不能改。"""
+    """别人的动态不能改。"""
     _, owner = _register_member(client)
     _, other = _register_member(client)
 
-    post = client.post(API, headers=owner, json={"title": "作者的帖子"}).json()
+    post = client.post(API, headers=owner, json={"title": "作者的动态"}).json()
     client.patch(f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "rejected"})
 
     response = client.patch(f"{API}/{post['id']}", headers=other, json={"title": "篡改"})
@@ -627,16 +627,16 @@ def test_resubmit_requires_owner(client, auth_headers):
 def test_resubmit_requires_login(client, auth_headers):
     """不带会员令牌不能改。"""
     member_id, member = _register_member(client)
-    post = client.post(API, headers=member, json={"title": "待改的帖子"}).json()
+    post = client.post(API, headers=member, json={"title": "待改的动态"}).json()
     client.patch(f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "rejected"})
 
     assert client.patch(f"{API}/{post['id']}", json={"title": "匿名改"}).status_code == 401
 
 
 def test_resubmit_approved_post_is_rejected(client, auth_headers):
-    """已通过的帖子不允许改（避免绕过审核）。"""
+    """已通过的动态不允许改（避免绕过审核）。"""
     member_id, member = _register_member(client)
-    post = client.post(API, headers=member, json={"title": "已通过的帖子"}).json()
+    post = client.post(API, headers=member, json={"title": "已通过的动态"}).json()
     client.patch(f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "approved"})
 
     response = client.patch(f"{API}/{post['id']}", headers=member, json={"title": "偷偷改"})
@@ -651,8 +651,8 @@ def test_member_posts_unknown_member_is_empty(client):
 
 
 # ==================== 收藏 ====================
-def _approved_post(client, auth_headers, title: str = "可收藏的帖子") -> dict:
-    """发一条帖子并审核通过（只有通过的才能被收藏）。"""
+def _approved_post(client, auth_headers, title: str = "可收藏的动态") -> dict:
+    """发一条动态并审核通过（只有通过的才能被收藏）。"""
     post = create_post(client, title=title)
     client.patch(
         f"{API}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
@@ -723,9 +723,9 @@ def test_favorite_is_idempotent(client, auth_headers):
 
 
 def test_favorite_only_approved_posts(client, auth_headers):
-    """待审核 / 已拒绝的帖子不能收藏。"""
+    """待审核 / 已拒绝的动态不能收藏。"""
     member_id, member = _register_member(client)
-    pending = client.post(API, headers=member, json={"title": "待审核的帖子"}).json()
+    pending = client.post(API, headers=member, json={"title": "待审核的动态"}).json()
 
     response = client.post(f"{API}/{pending['id']}/favorite", headers=member)
     assert response.status_code == 400
@@ -745,7 +745,7 @@ def test_favorites_newest_first_and_isolated(client, auth_headers):
 
     mine = client.get(f"{API}/favorites", headers=first).json()
     assert [item["title"] for item in mine["items"]] == ["后收藏的", "先收藏的"]
-    # 收藏数是全体会员的总数：后收藏的帖子有两个人收藏
+    # 收藏数是全体会员的总数：后收藏的动态有两个人收藏
     counts = {item["title"]: item["favorite_count"] for item in mine["items"]}
     assert counts == {"后收藏的": 2, "先收藏的": 1}
 
@@ -755,9 +755,9 @@ def test_favorites_newest_first_and_isolated(client, auth_headers):
 
 
 def test_favorites_drop_deleted_posts(client, auth_headers):
-    """收藏的帖子被删掉后，不再出现在我的收藏里。"""
+    """收藏的动态被删掉后，不再出现在我的收藏里。"""
     member_id, member = _register_member(client)
-    post = _approved_post(client, auth_headers, "会被删掉的帖子")
+    post = _approved_post(client, auth_headers, "会被删掉的动态")
     client.post(f"{API}/{post['id']}/favorite", headers=member)
 
     assert client.delete(f"{API}/{post['id']}", headers=auth_headers).status_code == 200
@@ -766,7 +766,7 @@ def test_favorites_drop_deleted_posts(client, auth_headers):
 
 # ==================== 后台列表 ====================
 def test_list_requires_admin(client):
-    """未登录不能看帖子列表。"""
+    """未登录不能看动态列表。"""
     assert client.get(API).status_code == 401
 
 
@@ -782,7 +782,7 @@ def test_list_returns_newest_first(client, auth_headers):
 
 
 def test_list_filter_by_status(client, auth_headers):
-    approved = create_post(client, title="会被通过的帖子")
+    approved = create_post(client, title="会被通过的动态")
     client.patch(
         f"{API}/{approved['id']}/status", headers=auth_headers, json={"status": "approved"}
     )
@@ -796,8 +796,8 @@ def test_list_filter_by_status(client, auth_headers):
 
 
 def test_search_by_post_no(client, auth_headers):
-    """关键词搜索支持帖子 ID（12 位编号）。"""
-    target = create_post(client, title="按编号搜的帖子")
+    """关键词搜索支持动态 ID（12 位编号）。"""
+    target = create_post(client, title="按编号搜的动态")
     create_post(client, title="干扰项")
 
     body = client.get(
@@ -893,7 +893,7 @@ def test_delete_post(client, auth_headers):
     assert client.get(f"{API}/{post['id']}", headers=auth_headers).status_code == 404
 
 def test_publisher_follows_member_nickname(client, auth_headers):
-    """会员改昵称后，旧帖子的发布人昵称实时跟着变（库里存的是历史快照）。"""
+    """会员改昵称后，旧动态的发布人昵称实时跟着变（库里存的是历史快照）。"""
     member_id, member = _register_member(client)
     post = client.post(API, headers=member, json={"title": "昵称同步"}).json()
     client.patch(

@@ -50,7 +50,7 @@ class MemberMessage(PKMixin, TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(120), default="", comment="标题")
     content: Mapped[str] = mapped_column(Text, default="", comment="正文摘要")
     post_id: Mapped[Optional[int]] = mapped_column(
-        Integer, nullable=True, index=True, comment="关联帖子 ID（可为空）"
+        Integer, nullable=True, index=True, comment="关联动态 ID（可为空）"
     )
     from_member_id: Mapped[Optional[int]] = mapped_column(
         Integer, nullable=True, index=True, comment="触发人会员 ID（可为空）"

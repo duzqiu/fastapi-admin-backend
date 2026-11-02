@@ -785,7 +785,7 @@ def test_admin_member_management(client, auth_headers):
     assert client.get(f"{API}/members/{member_id}", headers=auth_headers).status_code == 404
 
 
-# ==================== 公开资料（帖子作者主页用，无需登录）====================
+# ==================== 公开资料（动态作者主页用，无需登录）====================
 def test_public_member_profile_needs_no_login(client):
     """作者主页要的资料：不带令牌也能读到昵称 / 简介 / 头像，且不含隐私字段。"""
     member = _register(client, "public-author@example.com")

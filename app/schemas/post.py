@@ -1,4 +1,4 @@
-"""文章管理（帖子）相关 Pydantic 模型。"""
+"""文章管理（动态）相关 Pydantic 模型。"""
 
 from datetime import datetime
 from typing import List, Optional
@@ -10,7 +10,7 @@ from app.schemas.common import ORMBaseModel
 
 
 class PostCreate(BaseModel):
-    """用户发帖入参。
+    """用户发动态入参。
 
     `publisher` 留空时取登录会员的昵称（未登录则记为「匿名用户」），
     所以客户端可以不传。发表后统一进「待审核」。
@@ -65,18 +65,18 @@ class PostStatusUpdate(BaseModel):
 
 
 class PostOut(ORMBaseModel):
-    """帖子出参。"""
+    """动态出参。"""
 
     id: int
-    post_no: str = Field(default="", description="帖子编号（12 位随机数字，对外展示的帖子 ID）")
+    post_no: str = Field(default="", description="动态编号（12 位随机数字，对外展示的动态 ID）")
     publisher: str
     publisher_avatar: str = Field(
-        default="", description="发布者头像地址（匿名发帖或未设置头像时为空）"
+        default="", description="发布者头像地址（匿名发动态或未设置头像时为空）"
     )
     member_id: Optional[int] = None
     is_following: bool = Field(
         default=False,
-        description="当前登录会员是否已关注作者（未登录 / 匿名帖恒为 false）",
+        description="当前登录会员是否已关注作者（未登录 / 匿名动态恒为 false）",
     )
     title: str
     content: str
@@ -117,16 +117,16 @@ class PostOut(ORMBaseModel):
 
 
 class PostReceivedLikesOut(BaseModel):
-    """当前会员的获赞汇总：自己所有帖子被点赞的次数合计。"""
+    """当前会员的获赞汇总：自己所有动态被点赞的次数合计。"""
 
     received_like_count: int = Field(
-        default=0, description="获赞总数（所有帖子合计，含待审核 / 已拒绝）"
+        default=0, description="获赞总数（所有动态合计，含待审核 / 已拒绝）"
     )
 
 
 # ------------------------- 评论 -------------------------
 class PostReceivedCommentsOut(BaseModel):
-    """当前会员的被评论汇总：自己所有帖子收到的（已通过）评论数。"""
+    """当前会员的被评论汇总：自己所有动态收到的（已通过）评论数。"""
 
     received_comment_count: int = Field(
         default=0, description="被评论总数（只算已通过审核的评论）"
@@ -165,8 +165,8 @@ class PostCommentOut(ORMBaseModel):
 
     id: int
     post_id: int
-    post_title: str = Field(default="", description="所属帖子标题")
-    post_no: str = Field(default="", description="所属帖子编号")
+    post_title: str = Field(default="", description="所属动态标题")
+    post_no: str = Field(default="", description="所属动态编号")
     member_id: Optional[int] = None
     publisher: str = ""
     publisher_avatar: str = Field(

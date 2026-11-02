@@ -84,7 +84,7 @@ def test_following_list(client, auth_headers):
 
 
 def test_following_posts_feed(client, auth_headers):
-    """关注动态：只出关注的人已通过的帖子。"""
+    """关注动态：只出关注的人已通过的动态。"""
     me_id, me, _ = _register_member(client)
     author_id, author, _ = _register_member(client)
     stranger_id, stranger, _ = _register_member(client)
@@ -112,10 +112,10 @@ def test_following_posts_feed(client, auth_headers):
 
 
 def test_post_and_public_profile_carry_is_following(client, auth_headers):
-    """帖子出参与作者公开资料都会带 is_following（按查看者）。"""
+    """动态出参与作者公开资料都会带 is_following（按查看者）。"""
     me_id, me, _ = _register_member(client)
     author_id, author, _ = _register_member(client)
-    post = _approved_post(client, auth_headers, author, "关注状态-帖子")
+    post = _approved_post(client, auth_headers, author, "关注状态-动态")
 
     before = client.get(f"{POSTS}/latest", headers=me).json()["items"]
     item = next(entry for entry in before if entry["id"] == post["id"])

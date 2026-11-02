@@ -25,7 +25,13 @@ os.environ["EMAIL_CODE_DEBUG_RETURN"] = "true"
 os.environ["EMAIL_CODE_RESEND_SECONDS"] = "0"
 # 上传目录**每次运行前清空**：它不在内存里，上一次跑留下的头像会被「按会员 ID 读头像」
 # 那条回退逻辑读到，导致本次「还没上传」的断言偶发失败。
-UPLOAD_DIR = Path(tempfile.gettempdir()) / "fastapi_admin_test_uploads"
+# 部分环境（如容器 / 沙箱）里 tempfile.gettempdir() 会退化成项目根目录，此时改写到项目内的
+# .pytest_uploads/（已加入 .gitignore），避免测试上传文件散落到仓库里。
+_TEMP_ROOT = Path(tempfile.gettempdir()).resolve()
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if _TEMP_ROOT == _PROJECT_ROOT:
+    _TEMP_ROOT = _PROJECT_ROOT / ".pytest_uploads"
+UPLOAD_DIR = _TEMP_ROOT / "fastapi_admin_test_uploads"
 if UPLOAD_DIR.exists():
     shutil.rmtree(UPLOAD_DIR, ignore_errors=True)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

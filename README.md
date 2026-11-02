@@ -37,8 +37,8 @@
 | --- | --- |
 | 后台账号认证鉴权 | 账号密码登录、JWT（access + refresh）、角色权限（admin / editor / user） |
 | 用户中心（会员） | 邮箱验证码注册（自动分配 10 位唯一会员编号）、登录、忘记密码、个人资料（昵称/头像/背景图/性别/生日/简介）、头像与背景图上传 |
-| 点菜菜单与订单 | 菜品（菜名/图片/价格/库存）、**多套餐与售卖规则**（起购 / 限购 / 每日限量 / 供应时段）、分类与标签、**销量统计**、下单与订单管理闭环 |
-| 通用后台 CRUD | 后台用户管理、**会员管理**（查看 / 修改 / 启禁用 / 重置密码 / 删除）、菜品管理、订单管理 |
+| 文章与评论 | 动态发布、评论、点赞 / 收藏、后台审核；**官号文章**独立域（发布 / 编辑 / 审核 / 访问量） |
+| 通用后台 CRUD | 后台用户管理、**会员管理**（查看 / 修改 / 启禁用 / 重置密码 / 删除）、**官号文章**（发布 / 编辑 / 审核 / 访问量）、动态与评论审核 |
 | 分层基础设施 | 统一配置、统一异常、统一分页、请求日志、跨域、邮件、文件上传、初始化与迁移脚本 |
 | 部署方式 | 单机 / Gunicorn / systemd / Nginx 反代，以及 **Docker 容器（可对接另一个容器里的 PostgreSQL）** |
 
@@ -137,8 +137,8 @@ fastapi-admin-backend/
 │   │   ├── user.py                     后台账号表 system_auth_admin_user + UserRole 枚举
 │   │   ├── member.py                   注册用户表 member_account_info（含 10 位唯一编号）+ MemberGender
 │   │   ├── email_code.py               邮箱验证码表 + EmailScene 枚举（场景）
-│   │   ├── dish.py                     菜品域：分类 / 标签 / 菜品 / 套餐规格（含售卖规则）
-│   │   ├── dish_order.py               订单域：订单、订单明细、状态流转规则
+│   │   ├── post.py                     文章 / 评论 / 点赞 / 收藏
+│   │   ├── official_article.py         官号文章
 │   │   └── __init__.py                 统一导出（新增模型必须在此注册）
 │   │
 │   ├── schemas/                        ★ DTO 层
@@ -146,8 +146,8 @@ fastapi-admin-backend/
 │   │   ├── user.py                     后台账号出入参（含密码强度校验）
 │   │   ├── member.py                   会员注册/登录/资料/后台管理出入参
 │   │   ├── email.py                    验证码发送出入参
-│   │   ├── dish.py                     菜品域出入参（分类 / 标签 / 菜品 / 套餐 / 点菜菜单）
-│   │   ├── dish_order.py               订单出入参（下单、明细、状态、统计）
+│   │   ├── post.py                     动态 / 评论出入参
+│   │   ├── official_article.py         官号文章出入参
 │   │   ├── auth.py                     登录 / 令牌模型
 │   │   ├── system.py                   健康检查、系统信息、首页统计
 │   │   └── __init__.py                 统一导出
@@ -157,8 +157,8 @@ fastapi-admin-backend/
 │   │   ├── user_repository.py          后台账号表专属查询
 │   │   ├── member_repository.py        会员表专属查询（含性别/新注册统计）
 │   │   ├── email_code_repository.py    验证码查询、作废、尝试次数
-│   │   ├── dish_repository.py          分类 / 标签 / 菜品 / 套餐查询与统计
-│   │   ├── dish_order_repository.py    订单查询、状态计数、按明细聚合销量
+│   │   ├── post_repository.py          动态 / 评论 / 点赞 / 收藏查询
+│   │   ├── official_article_repository.py 官号文章查询与访问量
 │   │   └── __init__.py
 │   │
 │   ├── services/                       ★ 服务层（业务逻辑）
@@ -167,8 +167,8 @@ fastapi-admin-backend/
 │   │   ├── email_code_service.py       验证码生成、限流、发送、校验
 │   │   ├── member_auth_service.py      会员：注册 / 登录 / 刷新 / 重置密码 / 改密
 │   │   ├── member_service.py           会员资料 + 图片上传（头像 / 背景图）+ 后台管理
-│   │   ├── dish_service.py             分类 / 标签 / 菜品 / 套餐管理 + 点菜菜单查询
-│   │   ├── dish_order_service.py       下单校验、库存销量联动、取消回滚、状态流转、统计
+│   │   ├── post_service.py             动态发布 / 审核 / 评论
+│   │   ├── official_article_service.py 官号文章发布 / 编辑 / 审核 / 访问量
 │   │   ├── system_service.py           健康检查 / 系统信息 / 首页统计
 │   │   └── __init__.py
 │   │
@@ -182,9 +182,8 @@ fastapi-admin-backend/
 │   │           ├── member_auth.py       /member/auth/*  用户中心：验证码、注册、登录、重置密码
 │   │           ├── member_profile.py    /member/*       用户中心：我的资料、头像 / 背景图、改密
 │   │           ├── members.py           /members/*      后台会员管理（仅管理员）
-│   │           ├── menu.py             /menu/*         点菜菜单：分类、菜品、下单、我的订单
-│   │           ├── dishes.py           /dishes/*       后台菜品 / 分类 / 标签管理
-│   │           ├── dish_orders.py      /dish-orders/*  后台订单管理与统计
+│   │           ├── posts.py            /posts/*        动态与评论（C 端 + 后台审核）
+│   │           ├── official_articles.py /official-articles/* 官号文章（后台 + 公开详情）
 │   │           └── system.py            /system/*       健康检查、系统信息、首页统计
 │   │
 │   └── middlewares/
@@ -204,7 +203,7 @@ fastapi-admin-backend/
 │   ├── conftest.py                     测试夹具（内存 SQLite、TestClient、鉴权头）
 │   ├── test_api.py                     认证 / 后台账号主链路冒烟测试
 │   ├── test_member.py                  用户中心全流程测试
-│   └── test_dish.py                    点菜菜单、套餐规则与订单全流程测试
+│   └── test_retired_features.py        已下线接口（菜品管理 / 倒数日）回归测试
 │
 ├── data/                               SQLite 数据文件目录（git 忽略，自动创建）
 ├── run.py                              开发环境启动脚本
@@ -298,6 +297,7 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/auth/login `
 | `LOG_LEVEL` | INFO | 日志级别 |
 | `DATABASE_URL` | sqlite:///./data/app.db | 数据库连接串（见下节） |
 | `SQL_ECHO` | false | 是否打印 SQL |
+| `DROP_LEGACY_TABLES` | true | 启动时自动删除已下线功能（菜品管理 / 待办）遗留的 8 张表；删除不可恢复 |
 | `SECRET_KEY` | 示例值 | JWT 签名密钥，**生产必须更换** |
 | `ALGORITHM` | HS256 | JWT 算法 |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | 1440 | access_token 有效期（分钟） |
@@ -434,17 +434,17 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 | POST | `/member/profile/background` | 上传背景图（multipart，≤5MB，与头像同一套存放规则） | 会员 |
 | POST | `/member/send-code` | 已登录获取「修改密码」邮箱验证码（邮箱取当前账号，无需传参） | 会员 |
 | POST | `/member/profile/change-password` | 修改密码：入参 `code` `new_password` `confirm_password` | 会员 |
-| GET | `/members/{id}/public` | 会员**公开资料**（昵称 / 头像 `avatar_url` / 简介 / 地区 / 会员编号），帖子作者主页用；不含邮箱手机号，被禁用按 404 | 公开 |
+| GET | `/members/{id}/public` | 会员**公开资料**（昵称 / 头像 `avatar_url` / 简介 / 地区 / 会员编号），动态作者主页用；不含邮箱手机号，被禁用按 404 | 公开 |
 
-### 文章（帖子）收藏 `/posts`（用户侧）
+### 文章（动态）收藏 `/posts`（用户侧）
 
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
-| GET | `/posts/favorites` | 我收藏的帖子（按收藏时间倒序，只出已通过的） | 会员 |
-| POST | `/posts/{id}/favorite` | 收藏帖子（幂等；只能收藏已通过的帖子） | 会员 |
+| GET | `/posts/favorites` | 我收藏的动态（按收藏时间倒序，只出已通过的） | 会员 |
+| POST | `/posts/{id}/favorite` | 收藏动态（幂等；只能收藏已通过的动态） | 会员 |
 | DELETE | `/posts/{id}/favorite` | 取消收藏（幂等，没收藏过也返回成功） | 会员 |
 
-帖子出参 `PostOut` 里另有两个收藏字段：
+动态出参 `PostOut` 里另有两个收藏字段：
 
 - `is_favorited`：**按查看者**算，带会员令牌时按该会员的收藏返回，未登录恒为 `false`；
 - `favorite_count`：全体会员的收藏总数，收藏 / 取消时同步返回最新值。
@@ -484,10 +484,10 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 
 > 挂在 API 前缀下，前端的 `/api` 代理与 Nginx 的 `/api` 反向代理可直接复用，无需额外配置静态资源规则。
 
-### 点菜菜单与订单
+### 点菜菜单与订单（已下线）
 
-会员端 `/member/**` 与点菜端 `/menu/**` 的完整说明见 [第九节](#九点菜菜单与订单体系)；
-后台的 `/dishes`、`/dish-categories`、`/dish-tags`、`/dish-orders` 同样在该节列出。
+会员端 `/member/**` 仍保留；点菜 `/menu/**`、后台菜品管理、待办接口及其数据库表已全部移除，
+详见 [第九节](#九点菜菜单与订单体系已下线)。
 
 ### 响应约定
 
@@ -558,7 +558,7 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 | 可检索 | 后台 `GET /members?keyword=<编号>` 可按编号精确查找 |
 | 不可修改 | 由系统生成，资料编辑接口（会员端 / 后台）都不接受该字段 |
 
-> 为什么不用主键 `id` 充当 10 位 ID：`dish_order_info.member_id` 等外键依赖自增主键，
+> 为什么不用主键 `id` 充当 10 位 ID：`article_official_info.member_id` 等外键依赖自增主键，
 > 改成随机会丢掉有序性、破坏外键语义，且写入时需要处理冲突。新增独立的业务编号是更稳妥的做法。
 
 ### 8.3 邮箱验证码机制
@@ -668,158 +668,33 @@ curl.exe -X POST http://127.0.0.1:8000/api/v1/member/auth/send-code `
 
 ---
 
-## 九、点菜菜单与订单体系
+## 九、点菜菜单与订单体系（已下线）
 
-覆盖「菜品维护 → 顾客点单 → 后台接单」的完整闭环。
+该模块已整体移除：后台「菜品管理」菜单、`/dishes`、`/dish-categories`、`/dish-tags`、
+`/dish-orders`、C 端 `/menu/**`、待办 `/countdowns` 与 `/member/countdowns` 均已删除。
 
-### 9.1 数据模型与关系
+对应的 8 张表：
 
-```
-DishCategory 1 ──── n Dish n ──── n DishTag        （分类：一对多；标签：多对多）
-    （订单表的 member_id 外键指向 user 表 —— 即用户中心注册用户）
-                         │
-                         1
-                         │
-                         n
-                      DishSpec                      （套餐 / 规格：价格、库存、销量、售卖规则）
+    dish_order_item
+    dish_order_info
+    dish_base_spec
+    dish_base_tag_relation
+    dish_base_info
+    dish_base_category
+    dish_base_tag
+    countdown_base_info
 
-DishOrder 1 ──── n DishOrderItem n ──── 1 Dish / DishSpec   （订单明细保存下单时快照）
-DishOrder   n ──── 1 Member                                 （扫码点单可为匿名）
-```
+**不需要手工删库**：应用启动时 `init_db()` 会调用 `app/db/legacy_cleanup.py`
+的 `drop_legacy_tables()`，按白名单自动删除这些表（只删这 8 张，子表先于主表），
+所以「拉代码 → 重启服务」即可完成清理。删除不可恢复，需要保留数据时
+在 `.env` 里设 `DROP_LEGACY_TABLES=false`。
 
-| 模型 | 表 | 说明 |
-| --- | --- | --- |
-| `DishCategory` | `dish_base_category` | 菜品分类（热菜 / 凉菜 / 主食 / 饮品…），一个菜品属于一个分类 |
-| `DishTag` | `dish_base_tag` + `dish_base_tag_relation` | 菜品标签（招牌 / 新品 / 微辣 / 素食…），一个菜品可有多个标签；带 `is_active` 启用状态 |
-| `Dish` | `dish_base_info` | 菜名、图片、价格、库存、**累计销量**、单位、状态、是否推荐、排序 |
-| `DishSpec` | `dish_base_spec` | 套餐 / 规格（单点 / 单人套餐 / 双人套餐…），承载独立价格、库存、销量与**售卖规则** |
-| `DishOrder` | `dish_order_info` | 订单主表：订单号、桌号、会员、状态、总份数、总金额、备注、各状态时间 |
-| `DishOrderItem` | `dish_order_item` | 订单明细：菜名 / 套餐名 / 图片 / 单价快照 + 数量 + 小计 |
-
-### 9.2 菜品、套餐与规则
-
-- **一个菜品可以有多个套餐**，每个套餐有独立的价格、库存、销量和售卖规则；
-- 菜品本身也有价格与库存，**没有套餐的菜品**（如「米饭」「凉拌黄瓜」）直接按菜品自身价格与库存售卖；
-- 下单口径：
-  - 菜品**无套餐** → 只传 `dish_id`；
-  - 菜品**有套餐** → 必须传 `spec_id`，且「菜品总库存」与「套餐库存」需同时足够。
-
-**套餐支持的售卖规则**
-
-| 规则 | 字段 | 说明 |
-| --- | --- | --- |
-| 起购份数 | `min_quantity` | 单次下单不少于该数量 |
-| 每单限购 | `max_quantity_per_order` | 0 表示不限购 |
-| 每日限量 | `daily_limit` | 0 表示不限量；按「本地日期」自动重置 `sold_today` |
-| 供应时段 | `serve_start_time` / `serve_end_time` | "HH:MM"，留空表示全天；支持跨零点（如 22:00 - 02:00） |
-| 默认选中 | `is_default` | 同一菜品仅一个默认套餐，设置时会自动取消其它套餐的默认标记 |
-| 可售开关 | `is_active` | 停售后该套餐不再出现在点菜菜单中 |
-
-> 「营业时段」与「每日限量」按**服务器本地时间**判断（`app/core/utils.py` 的 `local_now` / `local_today`），
-> 而所有落库时间戳仍使用 **UTC**，两者互不影响。
-
-### 9.3 销量是怎么算出来的
-
-采用「**冗余计数 + 订单明细**」双重保障：
-
-1. 下单成功时，`Dish.stock` 与 `DishSpec.stock` 各扣减对应数量，
-   `Dish.sold_count`、`DishSpec.sold_count`、`DishSpec.sold_today` 同步累加（同一事务内提交）；
-2. 菜品库存扣到 0 时自动置为「已售罄」，取消订单回滚库存后会恢复「在售」；
-3. 取消订单（待接单 / 已接单）时按明细**原样回滚**库存与销量；
-4. `GET /dish-orders/dish-sales` 会**直接按订单明细聚合**销量，可与冗余计数交叉校验；
-5. 菜品列表、点菜菜单、统计卡片都直接读取 `sold_count`，避免每次实时聚合。
-
-### 9.4 订单状态流转
-
-```
-        ┌──────────┐  接单   ┌───────────┐  完成   ┌───────────┐
-        │ 待接单    │ ─────▶ │ 已接单     │ ─────▶ │ 已完成     │
-        │ pending  │        │ confirmed │        │ completed │
-        └────┬─────┘        └─────┬─────┘        └───────────┘
-             │  取消              │  取消                （终态）
-             ▼                    ▼
-        ┌────────────────────────────┐
-        │ 已取消 cancelled            │  ← 自动回滚库存与销量
-        └────────────────────────────┘
-```
-
-- 状态只能按上图的允许路径流转，非法流转返回 400（规则定义在 `ORDER_TRANSITIONS`）；
-- 「已完成 / 已取消」为终态，不能再变更；
-- 会员可以在用户中心取消**自己**的订单，管理员可以在后台取消任意未完成订单。
-
-### 9.5 接口清单
-
-**点菜（C 端）** `/api/v1/menu` —— 浏览公开，下单可匿名
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/menu/categories` | 菜单分类（只含启用且有在售菜品的分类，附带可点数量） |
-| GET | `/menu/tags` | 菜单标签（只含已启用的标签） |
-| GET | `/menu/dishes` | 菜品列表，支持 `keyword` `category_id` `tag_id` `is_recommended`；默认只返回在售且有库存的菜品 |
-| GET | `/menu/dishes/{id}` | 菜品详情，含全部可售套餐与售卖规则 |
-| POST | `/menu/orders` | **提交订单**（带会员令牌则关联会员，否则记为扫码点单） |
-| GET | `/menu/orders` | 我的订单（需会员登录） |
-| GET | `/menu/orders/{id}` | 我的订单详情（需会员登录） |
-| POST | `/menu/orders/{id}/cancel` | 取消我的订单（需会员登录） |
-
-**后台菜品管理**（仅管理员）
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET / POST | `/dishes` | 列表（支持 `keyword` `category_id` `tag_id` `status` `is_recommended` `low_stock`）/ 新建（可同时创建多个套餐） |
-| GET / PUT / DELETE | `/dishes/{id}` | 详情 / 更新 / 删除 |
-| PATCH | `/dishes/{id}/status` | 上架 / 下架 / 售罄 |
-| PATCH | `/dishes/{id}/stock` | 调整库存（`mode=set` 直接设置，`mode=add` 补货 / 报损） |
-| POST | `/dishes/upload-image` | 上传菜品图片 |
-| GET / POST | `/dishes/{id}/specs` | 套餐列表 / 新增套餐 |
-| PUT / DELETE | `/dishes/{id}/specs/{spec_id}` | 更新 / 删除套餐 |
-| GET | `/dishes/stats` | 菜品统计（总数 / 在售 / 库存告急 / 累计销量 / 销量排行） |
-| GET / POST | `/dish-categories` | 分类列表（含菜品数，支持 `only_active`）/ 新建分类 |
-| PUT / DELETE | `/dish-categories/{id}` | 更新 / 删除（分类下有菜品时不允许删除） |
-| GET / POST | `/dish-tags` | 标签列表（含关联菜品数，支持 `only_active`）/ 新建标签 |
-| PUT / DELETE | `/dish-tags/{id}` | 更新 / 删除标签（更新支持局部字段，如只传 `is_active`） |
-
-**后台订单管理** `/api/v1/dish-orders`（仅管理员）
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/dish-orders` | 订单列表，支持 `keyword`（订单号/桌号）`status` `created_after` `created_before` |
-| GET | `/dish-orders/{id}` | 订单详情（含明细） |
-| PATCH | `/dish-orders/{id}/status` | 接单 / 完成 / 取消（取消自动回滚库存与销量） |
-| DELETE | `/dish-orders/{id}` | 删除订单 |
-| GET | `/dish-orders/stats` | 订单统计（各状态数量 + 今日订单数 / 营业额 / 份数） |
-| GET | `/dish-orders/dish-sales` | 按订单明细聚合的菜品销量排行 |
-
-### 9.6 下单示例
+Alembic 迁移 `4d2a8f6c1b90` 同样会删这 8 张表（可重复执行、表不存在则跳过），
+适合已经在用迁移管理结构的环境：
 
 ```powershell
-# 1. 查看菜单（无需登录）
-curl.exe "http://127.0.0.1:8000/api/v1/menu/dishes?category_id=1"
-
-# 2. 下单：宫保鸡丁「单人套餐」x1 + 米饭 x2（米饭无套餐，不传 spec_id）
-curl.exe -X POST http://127.0.0.1:8000/api/v1/menu/orders `
-  -H "Content-Type: application/json" `
-  -d '{\"table_no\":\"A08\",\"remark\":\"不要香菜\",\"items\":[{\"dish_id\":1,\"spec_id\":2,\"quantity\":1},{\"dish_id\":4,\"quantity\":2}]}'
-
-# 3. 后台接单（<管理员令牌> 换成 /auth/login 返回的 access_token）
-curl.exe -X PATCH http://127.0.0.1:8000/api/v1/dish-orders/1/status `
-  -H "Authorization: Bearer <管理员令牌>" -H "Content-Type: application/json" `
-  -d '{\"status\":\"confirmed\"}'
+python -m alembic upgrade head
 ```
-
-### 9.7 演示数据
-
-`python scripts/init_db.py` 会写入（表为空时才写入）：
-
-| 分类 | 菜品 | 价格 | 库存 | 套餐 |
-| --- | --- | --- | --- | --- |
-| 热菜 | 宫保鸡丁（招牌 / 微辣） | ￥38 | 50 | 单点 ￥38、单人套餐 ￥52（每日限量 20、每单限购 5、供应 10:00-22:00）、双人套餐 ￥96 |
-| 热菜 | 麻婆豆腐（重辣 / 素食） | ￥26 | 40 | 单点 ￥26、下饭套餐 ￥32 |
-| 凉菜 | 凉拌黄瓜（素食） | ￥16 | 30 | 无套餐（演示直接按菜品下单） |
-| 主食 | 米饭 | ￥3 | 200 | 无套餐 |
-| 饮品 | 柠檬茶（新品） | ￥12 | 60 | 中杯 ￥12、大杯 ￥15 |
-
----
 
 ## 十、数据库迁移：SQLite → PostgreSQL / MySQL
 
@@ -876,7 +751,7 @@ CREATE DATABASE admin_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_c
   --create-tables --truncate
 
 # 只迁移指定的表
-... --tables system_auth_admin_user,member_account_info,dish_base_info,dish_order_info
+... --tables system_auth_admin_user,member_account_info,article_post_info
 
 # 只校验两个库行数是否一致，不写入任何数据
 ./.venv/Scripts/python.exe scripts/migrate_database.py --target "<目标库URL>" --verify-only
@@ -1369,5 +1244,5 @@ BACKEND_CORS_ORIGINS=http://localhost:5173,https://admin.example.com
 | 下单提示「需要选择套餐」 | 该菜品配置了套餐，必须传 `spec_id`；不需要套餐的菜品请勿传该字段 |
 | 下单提示「仅在 xx-xx 供应」 | 套餐配置了供应时段，按服务器本地时间判断；留空即为全天供应 |
 | 下单提示「今日限量…剩余 N 份」 | 套餐的 `daily_limit` 生效，`sold_today` 在每个本地自然日自动重置 |
-| 销售统计与 `sold_count` 不一致 | `sold_count` 是冗余计数；以 `GET /dish-orders/dish-sales`（按明细聚合）为准排查 |
+| 销售统计与 `sold_count` 不一致 | `sold_count` 是冗余计数；可按订单明细聚合后交叉校验 |
 | 取消订单后库存没回来 | 只有「待接单 / 已接单」可取消；「已完成」为终态，需要手工调整库存 |

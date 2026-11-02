@@ -22,9 +22,6 @@ from app.db.session import get_db
 from app.models.member import Member
 from app.models.user import User, UserRole
 from app.services.auth_service import AuthService
-from app.services.countdown_service import CountdownService
-from app.services.dish_order_service import DishOrderService
-from app.services.dish_service import DishService
 from app.services.email_code_service import EmailCodeService
 from app.services.member_auth_service import MemberAuthService
 from app.services.member_service import MemberService
@@ -100,18 +97,6 @@ def get_member_service(db: Session = Depends(get_db)) -> MemberService:
 
 def get_email_code_service(db: Session = Depends(get_db)) -> EmailCodeService:
     return EmailCodeService(db)
-
-
-def get_dish_service(db: Session = Depends(get_db)) -> DishService:
-    return DishService(db)
-
-
-def get_dish_order_service(db: Session = Depends(get_db)) -> DishOrderService:
-    return DishOrderService(db)
-
-
-def get_countdown_service(db: Session = Depends(get_db)) -> CountdownService:
-    return CountdownService(db)
 
 
 def get_resume_service(db: Session = Depends(get_db)) -> ResumeService:

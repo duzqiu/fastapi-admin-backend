@@ -2,9 +2,11 @@
 
 在应用启动（lifespan）时调用，幂等，可重复执行。
 
-`create_all()` **只建表、不改表**，所以这里分两步走：
+`create_all()` **只建表、不改表**，所以这里分三步走：
 1. `create_tables()` 建出缺失的表；
-2. `sync_missing_columns()` 把模型里新增、库里还没有的**列**补上
+2. `drop_legacy_tables()` 删除已下线功能（菜品管理 / 待办）遗留的表
+   （见 app/db/legacy_cleanup.py，可用 `DROP_LEGACY_TABLES=false` 关闭）；
+3. `sync_missing_columns()` 把模型里新增、库里还没有的**列**补上
    （见 app/db/schema_sync.py）—— 于是「拉代码 → 重建镜像 → 起服务」即可，
    不需要任何人手工执行迁移命令。
 
@@ -25,14 +27,10 @@ from app.core.security import hash_password
 from app.core.site_password import hash_site_password
 from app.core.utils import generate_member_no, utcnow
 from app.db.base import Base
+from app.db.legacy_cleanup import drop_legacy_tables
 from app.db.schema_sync import sync_column_types, sync_missing_columns
 from app.db.session import SessionLocal, engine
 from app.models import (  # noqa: F401  确保模型已注册
-    Countdown,
-    Dish,
-    DishCategory,
-    DishSpec,
-    DishTag,
     EmailCode,
     Member,
     SiteSetting,
@@ -173,138 +171,6 @@ def create_initial_members(db: Session) -> None:
     )
 
 
-# ==================== 点菜菜单演示数据 ====================
-DEFAULT_CATEGORIES = [
-    {"name": "热菜", "description": "现炒热菜", "sort": 1},
-    {"name": "凉菜", "description": "开胃小菜", "sort": 2},
-    {"name": "主食", "description": "米饭面点", "sort": 3},
-    {"name": "饮品", "description": "冷热饮品", "sort": 4},
-]
-
-DEFAULT_TAGS = [
-    {"name": "招牌", "color": "danger", "sort": 1},
-    {"name": "新品", "color": "success", "sort": 2},
-    {"name": "微辣", "color": "warning", "sort": 3},
-    {"name": "重辣", "color": "danger", "sort": 4},
-    {"name": "素食", "color": "success", "sort": 5},
-]
-
-# 菜品 + 套餐（套餐承载价格、库存、销量与售卖规则）
-DEFAULT_DISHES = [
-    {
-        "name": "宫保鸡丁",
-        "category": "热菜",
-        "description": "选用鸡腿肉与花生米，甜咸微辣，经典川菜。",
-        "price": 38,
-        "stock": 50,
-        "sold_count": 128,
-        "unit": "份",
-        "is_recommended": True,
-        "sort": 1,
-        "tags": ["招牌", "微辣"],
-        "specs": [
-            {"name": "单点", "description": "仅菜品本身", "price": 38, "stock": 50, "sold_count": 90,
-             "is_default": True, "sort": 1},
-            {"name": "单人套餐", "description": "含米饭一碗 + 例汤", "price": 52, "stock": 30,
-             "sold_count": 30, "sort": 2, "min_quantity": 1, "max_quantity_per_order": 5,
-             "daily_limit": 20, "serve_start_time": "10:00", "serve_end_time": "22:00"},
-            {"name": "双人套餐", "description": "双份菜品 + 米饭两碗 + 例汤两份", "price": 96,
-             "stock": 10, "sold_count": 8, "sort": 3, "min_quantity": 1},
-        ],
-    },
-    {
-        "name": "麻婆豆腐",
-        "category": "热菜",
-        "description": "麻、辣、鲜、香，嫩豆腐配牛肉末。",
-        "price": 26,
-        "stock": 40,
-        "sold_count": 96,
-        "is_recommended": True,
-        "sort": 2,
-        "tags": ["重辣", "素食"],
-        "specs": [
-            {"name": "单点", "price": 26, "stock": 40, "sold_count": 76, "is_default": True, "sort": 1},
-            {"name": "下饭套餐", "description": "含米饭一碗", "price": 32, "stock": 20,
-             "sold_count": 20, "sort": 2},
-        ],
-    },
-    {
-        "name": "凉拌黄瓜",
-        "category": "凉菜",
-        "description": "清脆爽口，蒜香十足。",
-        "price": 16,
-        "stock": 30,
-        "sold_count": 45,
-        "sort": 3,
-        "tags": ["素食"],
-        "specs": [],  # 演示「没有套餐」的菜品：下单只传 dish_id
-    },
-    {
-        "name": "米饭",
-        "category": "主食",
-        "description": "东北珍珠米，粒粒分明。",
-        "price": 3,
-        "stock": 200,
-        "sold_count": 320,
-        "unit": "碗",
-        "sort": 4,
-        "tags": [],
-        "specs": [],
-    },
-    {
-        "name": "柠檬茶",
-        "category": "饮品",
-        "description": "现打柠檬，清爽解腻。",
-        "price": 12,
-        "stock": 60,
-        "sold_count": 76,
-        "unit": "杯",
-        "sort": 5,
-        "tags": ["新品"],
-        "specs": [
-            {"name": "中杯", "price": 12, "stock": 40, "sold_count": 50, "is_default": True, "sort": 1},
-            {"name": "大杯", "price": 15, "stock": 20, "sold_count": 26, "sort": 2},
-        ],
-    },
-]
-
-
-def create_initial_dishes(db: Session) -> None:
-    """写入演示分类 / 标签 / 菜品 / 套餐（表为空时才写入）。"""
-    if db.execute(select(Dish)).scalars().first():
-        return
-
-    category_map = {}
-    for item in DEFAULT_CATEGORIES:
-        category = DishCategory(**item)
-        db.add(category)
-        category_map[item["name"]] = category
-
-    tag_map = {}
-    for item in DEFAULT_TAGS:
-        tag = DishTag(**item)
-        db.add(tag)
-        tag_map[item["name"]] = tag
-
-    db.flush()
-
-    for item in DEFAULT_DISHES:
-        data = {k: v for k, v in item.items() if k not in ("category", "tags", "specs")}
-        dish = Dish(category_id=category_map[item["category"]].id, **data)
-        dish.tags = [tag_map[name] for name in item["tags"]]
-        for spec_data in item["specs"]:
-            dish.specs.append(DishSpec(**spec_data))
-        db.add(dish)
-
-    db.commit()
-    logger.info(
-        "已写入演示菜品数据：%d 个分类 / %d 个标签 / %d 道菜",
-        len(DEFAULT_CATEGORIES),
-        len(DEFAULT_TAGS),
-        len(DEFAULT_DISHES),
-    )
-
-
 def _is_outdated_schema(error: SQLAlchemyError) -> bool:
     """判断是不是「库里缺 ORM 里新加的列」——忘了跑迁移的典型症状。
 
@@ -323,6 +189,8 @@ def init_db() -> None:
     """完整初始化流程。"""
     try:
         create_tables()
+        # 下线功能清库：删除菜品管理 / 待办遗留的表（白名单，删前请备份）。
+        drop_legacy_tables(engine)
         # 老库兜底：模型里新增、库里还没有的列，在这里补上（只加列）。
         # 有它，「拉代码 → 重建镜像 → 起服务」就够了，不必手工跑迁移。
         sync_missing_columns(engine)
@@ -333,7 +201,6 @@ def init_db() -> None:
         try:
             create_initial_superuser(db)
             create_initial_members(db)
-            create_initial_dishes(db)
             create_initial_site_setting(db)
         finally:
             db.close()

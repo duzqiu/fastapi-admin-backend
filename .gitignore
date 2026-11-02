@@ -26,6 +26,9 @@ data/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+fastapi_admin_test_uploads/
+.pytest_uploads/
+pytest-of-*/
 
 # IDE
 .idea/

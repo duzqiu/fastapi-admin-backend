@@ -1,4 +1,4 @@
-"""文章管理服务：用户发帖、后台列表与审核。
+"""文章管理服务：用户发动态、后台列表与审核。
 
 事务边界：仓储只 flush，commit 统一在本层执行。
 """
@@ -37,9 +37,9 @@ _STATUS_TEXT = {
 
 
 class PostService:
-    """帖子业务逻辑层。"""
+    """动态业务逻辑层。"""
 
-    # 帖子编号查重重试次数（12 位编号空间下几乎用不到第二次）
+    # 动态编号查重重试次数（12 位编号空间下几乎用不到第二次）
     POST_NO_MAX_ATTEMPTS = 10
 
     # 他人可见：只出「已通过」，未过审的内容不对外暴露
@@ -95,7 +95,7 @@ class PostService:
             logger.warning("写入站内消息失败: type=%s", msg_type, exc_info=True)
 
     def _mark_interactions(self, posts: List[Post], member: Optional[Member]) -> None:
-        """给帖子标上「是否已点赞 / 收藏」和「被点赞 / 收藏次数」。
+        """给动态标上「是否已点赞 / 收藏」和「被点赞 / 收藏次数」。
 
         这四个都是出参字段，不落库：
         - `is_liked` / `is_favorited` 按查看者算，未登录一律 False；
@@ -124,13 +124,13 @@ class PostService:
             post.favorite_count = favorite_counts.get(post.id, 0)
             post.is_favorited = post.id in favorited
             post.comment_count = comment_counts.get(post.id, 0)
-            # 匿名帖没有作者，恒为未关注
+            # 匿名动态没有作者，恒为未关注
             post.is_following = bool(post.member_id) and post.member_id in followed
-        # 发布人昵称实时取会员当前昵称（库里 publisher 是发帖时的快照）
+        # 发布人昵称实时取会员当前昵称（库里 publisher 是发动态时的快照）
         self._refresh_post_publishers(posts)
 
     def _generate_post_no(self) -> str:
-        """生成一个未被占用的 12 位随机帖子编号。
+        """生成一个未被占用的 12 位随机动态编号。
 
         数据库层面还有唯一索引兜底，即使极端并发下撞号也不会写入重复编号。
         """
@@ -138,17 +138,17 @@ class PostService:
             candidate = generate_post_no()
             if not self.posts.post_no_taken(candidate):
                 return candidate
-        raise BusinessError("帖子编号生成失败，请稍后重试")
+        raise BusinessError("动态编号生成失败，请稍后重试")
 
     # ------------------------- 查询 -------------------------
     def get_or_404(self, post_id: int) -> Post:
         post = self.posts.get(post_id)
         if post is None:
-            raise NotFoundError(f"帖子不存在: id={post_id}")
+            raise NotFoundError(f"动态不存在: id={post_id}")
         return post
 
     def _refresh_post_publishers(self, posts: List[Post]) -> None:
-        """发布人昵称实时取会员当前昵称（库里 publisher 是发帖时的快照）。
+        """发布人昵称实时取会员当前昵称（库里 publisher 是发动态时的快照）。
 
         后台列表 / 详情也要看到新昵称，所以这里独立成一个可复用的方法；
         用 `set_committed_value` 只改内存，不标记脏、不写库。
@@ -189,9 +189,9 @@ class PostService:
         page_size: int = 10,
         viewer: Optional[Member] = None,
     ) -> Tuple[List[Post], int]:
-        """全部已发布（审核通过）的帖子，按发布时间倒序。
+        """全部已发布（审核通过）的动态，按发布时间倒序。
 
-        `viewer` 只是用来标「我有没有收藏过」，不影响返回哪些帖子。
+        `viewer` 只是用来标「我有没有收藏过」，不影响返回哪些动态。
         """
         items, total = self.posts.list_published(
             offset=(page - 1) * page_size,
@@ -203,15 +203,15 @@ class PostService:
     def get_public_post(
         self, post_id: int, *, viewer: Optional[Member] = None
     ) -> Post:
-        """公开的帖子详情（App 从消息点进来用）：只出已通过的。"""
+        """公开的动态详情（App 从消息点进来用）：只出已通过的。"""
         post = self.get_or_404(post_id)
         if post.status != PostStatus.APPROVED.value:
-            raise NotFoundError(f"帖子不存在: id={post_id}")
+            raise NotFoundError(f"动态不存在: id={post_id}")
         self._mark_interactions([post], viewer)
         return post
 
     def get_member_post(self, post_id: int, member: Member) -> Post:
-        """作者本人查看自己的帖子（**不限状态**）。
+        """作者本人查看自己的动态（**不限状态**）。
 
         用于「未通过审核」的消息点进来直接改稿：公开详情只出已通过的，
         走这里才能拿到被拒绝的动态内容与图片。
@@ -230,7 +230,7 @@ class PostService:
         page_size: int = 10,
         viewer: Optional[Member] = None,
     ) -> Tuple[List[Post], int]:
-        """「关注」页：我关注的人发布的已通过帖子，按发布时间倒序。"""
+        """「关注」页：我关注的人发布的已通过动态，按发布时间倒序。"""
         author_ids = sorted(self.follows.following_ids(member_id))
         items, total = self.posts.list_published_by_authors(
             author_ids,
@@ -247,9 +247,9 @@ class PostService:
         page_size: int = 10,
         viewer: Optional[Member] = None,
     ) -> Tuple[List[Post], int]:
-        """首页「热门」：全部已通过的帖子，按访问量倒序。
+        """首页「热门」：全部已通过的动态，按访问量倒序。
 
-        `viewer` 只用来标「我有没有收藏过」，不影响返回哪些帖子。
+        `viewer` 只用来标「我有没有收藏过」，不影响返回哪些动态。
         """
         items, total = self.posts.list_hot(
             offset=(page - 1) * page_size,
@@ -270,11 +270,11 @@ class PostService:
         size: int = RECOMMEND_SIZE,
         viewer: Optional[Member] = None,
     ) -> List[Post]:
-        """首页「推荐」：近一年内发布的已通过帖子，随机取 `size` 条。
+        """首页「推荐」：近一年内发布的已通过动态，随机取 `size` 条。
 
         池子按发布时间倒序取最近 `RECOMMEND_POOL_SIZE` 条，再用 Python 抽样：
         比 `ORDER BY random()` 更容易跨数据库（随机函数各家写法不同），
-        帖子量不大时也够用。
+        动态量不大时也够用。
         """
         since = utcnow() - timedelta(days=self.RECOMMEND_WINDOW_DAYS)
         pool = self.posts.list_published_since(since=since, limit=self.RECOMMEND_POOL_SIZE)
@@ -283,7 +283,7 @@ class PostService:
         return picked
 
     def record_view(self, post_id: int) -> Post:
-        """记录一次访问（详情页打开时调用），返回带最新 `view_count` 的帖子。"""
+        """记录一次访问（详情页打开时调用），返回带最新 `view_count` 的动态。"""
         post = self.get_or_404(post_id)
         self.posts.increment_view(post.id)
         self.db.commit()
@@ -299,10 +299,10 @@ class PostService:
         include_hidden: bool = False,
         viewer: Optional[Member] = None,
     ) -> Tuple[List[Post], int]:
-        """会员的帖子列表，最新的在前。
+        """会员的动态列表，最新的在前。
 
         - `include_hidden=True`（作者本人）：待审核 / 已通过 / 已拒绝全返回，
-          用户才能看到审核结果、并修改被拒绝的帖子；
+          用户才能看到审核结果、并修改被拒绝的动态；
         - 否则（访客）：只返回已通过的，未过审内容不对外暴露；
         - `viewer`：当前查看者，用来标「我有没有收藏过」（未登录为 None）。
         """
@@ -317,14 +317,14 @@ class PostService:
 
     # ------------------------- 收藏 -------------------------
     def favorite(self, post_id: int, member: Member) -> Post:
-        """收藏帖子（幂等）：重复收藏不会报错，也不会多出记录。
+        """收藏动态（幂等）：重复收藏不会报错，也不会多出记录。
 
-        只允许收藏审核通过的帖子 —— 待审核 / 已拒绝的内容对外并不存在，
+        只允许收藏审核通过的动态 —— 待审核 / 已拒绝的内容对外并不存在，
         收藏了也没有意义。
         """
         post = self.get_or_404(post_id)
         if post.status != PostStatus.APPROVED.value:
-            raise BusinessError("只能收藏审核通过的帖子")
+            raise BusinessError("只能收藏审核通过的动态")
 
         if self.favorites.find(member.id, post.id) is None:
             self.favorites.create(member_id=member.id, post_id=post.id)
@@ -349,13 +349,13 @@ class PostService:
 
     # ------------------------- 点赞 -------------------------
     def like(self, post_id: int, member: Member) -> Post:
-        """给帖子点赞（幂等）：重复点赞不会报错，也不会多出记录。
+        """给动态点赞（幂等）：重复点赞不会报错，也不会多出记录。
 
-        和收藏一样，只允许给审核通过的帖子点赞。
+        和收藏一样，只允许给审核通过的动态点赞。
         """
         post = self.get_or_404(post_id)
         if post.status != PostStatus.APPROVED.value:
-            raise BusinessError("只能给审核通过的帖子点赞")
+            raise BusinessError("只能给审核通过的动态点赞")
 
         if self.likes.find(member.id, post.id) is None:
             self.likes.create(member_id=member.id, post_id=post.id)
@@ -389,7 +389,7 @@ class PostService:
         return post
 
     def received_likes(self, member_id: int) -> int:
-        """某会员的获赞总数：自己所有帖子被点赞的次数合计。"""
+        """某会员的获赞总数：自己所有动态被点赞的次数合计。"""
         return self.likes.count_received(member_id)
 
     def list_received_like_posts(
@@ -400,7 +400,7 @@ class PostService:
         page_size: int = 10,
         viewer: Optional[Member] = None,
     ) -> Tuple[List[Post], int]:
-        """「获赞的帖子」列表：我发布的、收到过赞的帖子，按获赞数倒序。"""
+        """「获赞的动态」列表：我发布的、收到过赞的动态，按获赞数倒序。"""
         items, total = self.likes.list_posts_with_received_likes(
             member_id,
             offset=(page - 1) * page_size,
@@ -417,9 +417,9 @@ class PostService:
         page_size: int = 10,
         viewer: Optional[Member] = None,
     ) -> Tuple[List[Post], int]:
-        """当前会员收藏的帖子，最近收藏的在前。
+        """当前会员收藏的动态，最近收藏的在前。
 
-        只出已通过审核的：收藏后来被拒 / 被删的帖子不再出现在「我的收藏」里。
+        只出已通过审核的：收藏后来被拒 / 被删的动态不再出现在「我的收藏」里。
         `viewer` 用来标「是否已点赞 / 收藏」并带出两者的计数（默认就是本人）。
         """
         items, total = self.favorites.list_posts(
@@ -444,7 +444,7 @@ class PostService:
         """发表评论：默认「待审核」，后台通过后前台才展示。"""
         post = self.get_or_404(post_id)
         if post.status != PostStatus.APPROVED.value:
-            raise BusinessError("只能在审核通过的帖子下评论")
+            raise BusinessError("只能在审核通过的动态下评论")
 
         item = self.comments.create(
             post_id=post.id,
@@ -461,7 +461,7 @@ class PostService:
     def list_comments(
         self, post_id: int, *, page: int = 1, page_size: int = 20
     ) -> Tuple[List[PostComment], int]:
-        """某条帖子下**已通过**的评论（前台详情页用），最新的在前。"""
+        """某条动态下**已通过**的评论（前台详情页用），最新的在前。"""
         self.get_or_404(post_id)
         items, total = self.comments.list_by_post(
             post_id,
@@ -474,7 +474,7 @@ class PostService:
     def _refresh_comment_publishers(self, items: List[PostComment]) -> None:
         """评论人昵称实时取会员当前昵称（库里存的是发评论时的快照）。
 
-        和帖子一样用 `set_committed_value`：只改内存里的出参值，不标记脏、不写库。
+        和动态一样用 `set_committed_value`：只改内存里的出参值，不标记脏、不写库。
         """
         for item in items:
             if item.member is not None and item.member.display_name:
@@ -489,7 +489,7 @@ class PostService:
         status: Optional[Union[str, CommentStatus]] = None,
         post_id: Optional[int] = None,
     ) -> Tuple[List[PostComment], int]:
-        """后台评论管理：按状态 / 帖子 / 关键字筛选。"""
+        """后台评论管理：按状态 / 动态 / 关键字筛选。"""
         status_value = status.value if isinstance(status, CommentStatus) else status
         items, total = self.comments.search(
             keyword=keyword,
@@ -550,7 +550,7 @@ class PostService:
         self.db.commit()
 
     def received_comments(self, member_id: int) -> int:
-        """某会员的被评论总数：自己所有帖子收到的已通过评论合计。"""
+        """某会员的被评论总数：自己所有动态收到的已通过评论合计。"""
         return self.comments.count_received(member_id)
 
     def list_commented_posts(
@@ -561,7 +561,7 @@ class PostService:
         page_size: int = 10,
         viewer: Optional[Member] = None,
     ) -> Tuple[List[Post], int]:
-        """「被评论的帖子」列表：我发布的、收到过已通过评论的帖子，按评论数倒序。"""
+        """「被评论的动态」列表：我发布的、收到过已通过评论的动态，按评论数倒序。"""
         items, total = self.comments.list_posts_with_comments(
             member_id,
             offset=(page - 1) * page_size,
@@ -572,7 +572,7 @@ class PostService:
 
     # ------------------------- 写入 -------------------------
     def create_post(self, payload: PostCreate, member: Optional[Member] = None) -> Post:
-        """用户发帖：无论谁发、内容如何，进来一律是「待审核」。"""
+        """用户发动态：无论谁发、内容如何，进来一律是「待审核」。"""
         publisher = payload.publisher or (member.nickname if member else "") or "匿名用户"
         post = self.posts.create(
             post_no=self._generate_post_no(),
@@ -589,7 +589,7 @@ class PostService:
         return post
 
     def audit(self, post_id: int, status: PostStatus) -> Post:
-        """审核：只有「待审核」的帖子能审，结论一旦给出就不能再改。
+        """审核：只有「待审核」的动态能审，结论一旦给出就不能再改。
 
         已通过 / 已拒绝都是终态：改判会让审核失去意义，也会绕过「作者修改后
         重新提交」这条唯一的翻案路径。
@@ -601,7 +601,7 @@ class PostService:
         if post.status != PostStatus.PENDING.value:
             current = _STATUS_TEXT.get(post.status, post.status)
             raise BusinessError(
-                f"帖子当前是「{current}」，审核结果不可再更改"
+                f"动态当前是「{current}」，审核结果不可再更改"
                 "（被拒绝的需作者修改后重新提交）"
             )
 
@@ -625,17 +625,17 @@ class PostService:
         return post
 
     def resubmit(self, post_id: int, payload: PostUpdate, member: Member) -> Post:
-        """被拒绝的帖子：作者修改内容后重新提交，状态回到「待审核」。
+        """被拒绝的动态：作者修改内容后重新提交，状态回到「待审核」。
 
-        只有作者本人、且当前是「已拒绝」才允许 —— 已通过的帖子改动后必须重审，
+        只有作者本人、且当前是「已拒绝」才允许 —— 已通过的动态改动后必须重审，
         走这条路会让「已通过」被绕过，所以直接拒绝。
         """
         post = self.get_or_404(post_id)
 
         if post.member_id != member.id:
-            raise ForbiddenError("只能修改自己发布的帖子")
+            raise ForbiddenError("只能修改自己发布的动态")
         if post.status != PostStatus.REJECTED.value:
-            raise BusinessError("只有被拒绝的帖子可以修改后重新提交")
+            raise BusinessError("只有被拒绝的动态可以修改后重新提交")
 
         changes = payload.model_dump(exclude_unset=True, exclude_none=True)
         changes["status"] = PostStatus.PENDING.value
@@ -645,9 +645,9 @@ class PostService:
         return post
 
     def upload_image(self, upload: UploadFile) -> Dict[str, Any]:
-        """保存帖子图片，返回 `{url, filename, size}`。
+        """保存动态图片，返回 `{url, filename, size}`。
 
-        只落盘、不绑定：发帖时把返回的 `url` 放进 `images` 一起提交。
+        只落盘、不绑定：发动态时把返回的 `url` 放进 `images` 一起提交。
         """
         return save_image(upload, subdir="posts", prefix="post")
 

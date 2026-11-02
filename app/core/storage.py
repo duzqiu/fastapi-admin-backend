@@ -166,8 +166,8 @@ def save_image(
 ) -> Dict[str, Any]:
     """保存上传的图片并返回访问信息。
 
-    :param subdir:  上传目录下的子目录，如 "avatars" / "dishes"
-    :param prefix:  文件名前缀，如 "avatar" / "dish"
+    :param subdir:  上传目录下的子目录，如 "avatars" / "posts"
+    :param prefix:  文件名前缀，如 "avatar" / "post"
     :param identifier: 用于拼接文件名的业务标识（可选）
     """
     filename = upload.filename or ""

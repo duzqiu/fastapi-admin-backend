@@ -2,13 +2,9 @@
 
 from app.api.v1.endpoints import (
     auth,
-    countdowns,
-    dish_orders,
-    dishes,
     member_auth,
     member_profile,
     members,
-    menu,
     official_articles,
     resume,
     resume_public,
@@ -18,13 +14,9 @@ from app.api.v1.endpoints import (
 
 __all__ = [
     "auth",
-    "countdowns",
-    "dish_orders",
-    "dishes",
     "member_auth",
     "member_profile",
     "members",
-    "menu",
     "official_articles",
     "resume",
     "resume_public",

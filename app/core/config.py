@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./data/app.db"
     SQL_ECHO: bool = False
 
+    # 启动时删除已下线功能（菜品管理 / 待办）遗留的表。
+    # 删除不可恢复；若库里还有需要保留的历史数据，先备份或设为 false。
+    DROP_LEGACY_TABLES: bool = True
+
     # ---------- 安全 / JWT ----------
     SECRET_KEY: str = "please-change-this-secret-key-in-production-0123456789"
     ALGORITHM: str = "HS256"

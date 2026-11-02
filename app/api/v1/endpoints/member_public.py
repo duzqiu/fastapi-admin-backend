@@ -1,14 +1,14 @@
-"""会员公开资料接口（帖子作者主页用，**无需登录**）。
+"""会员公开资料接口（动态作者主页用，**无需登录**）。
 
 和后台会员管理（`members.py`，挂管理员依赖）完全分开：
 
 - 路径独立：`GET /members/{member_id}/public`，与后台的 `/members/{member_id}` 不重叠；
-- 不挂鉴权：任何人点开帖子作者头像都能看，不依赖登录态；
+- 不挂鉴权：任何人点开动态作者头像都能看，不依赖登录态；
 - 出参独立：用 `MemberPublicOut`，只含昵称 / 头像 / 简介 / 地区 / 会员编号，
   邮箱、手机号、生日等隐私字段不返回；
 - 被禁用的账号按「不存在」处理，避免对外暴露账号状态。
 
-作者发布的帖子走已有的 `GET /posts/by-member/{member_id}`（无需登录、只出已通过）。
+作者发布的动态走已有的 `GET /posts/by-member/{member_id}`（无需登录、只出已通过）。
 """
 
 from typing import Optional
@@ -91,7 +91,7 @@ def get_public_member(
     viewer: Optional[Member] = Depends(get_optional_member),
     service: MemberService = Depends(get_member_service),
 ) -> Member:
-    """返回帖子作者主页要展示的公开资料。
+    """返回动态作者主页要展示的公开资料。
 
     只出昵称、性别、头像、简介、地区与会员编号；不存在的会员和已禁用的账号都回 404。
     带上会员令牌时，`is_following` 表示当前登录会员是否已关注 TA。

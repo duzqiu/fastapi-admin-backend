@@ -1,4 +1,4 @@
-"""帖子评论测试：发表默认待审核、前台只出已通过、后台审核与删除。"""
+"""动态评论测试：发表默认待审核、前台只出已通过、后台审核与删除。"""
 
 import uuid
 
@@ -34,7 +34,7 @@ def _register_member(client) -> tuple[int, dict]:
 
 
 def _approved_post(client, auth_headers, member_headers) -> dict:
-    post = client.post(POSTS, headers=member_headers, json={"title": "评论-帖子"}).json()
+    post = client.post(POSTS, headers=member_headers, json={"title": "评论-动态"}).json()
     client.patch(
         f"{POSTS}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
     )
@@ -62,9 +62,9 @@ def test_create_comment_defaults_to_pending(client, auth_headers):
 
 
 def test_comment_only_on_approved_post(client, auth_headers):
-    """待审核的帖子不能评论。"""
+    """待审核的动态不能评论。"""
     member_id, member = _register_member(client)
-    post = client.post(POSTS, headers=member, json={"title": "待审帖子"}).json()
+    post = client.post(POSTS, headers=member, json={"title": "待审动态"}).json()
     response = client.post(
         f"{POSTS}/{post['id']}/comments", headers=member, json={"content": "x"}
     )
@@ -113,11 +113,11 @@ def test_admin_comment_management(client, auth_headers):
     assert listed.status_code == 200, listed.text
     ids = [item["id"] for item in listed.json()["items"]]
     assert comment["id"] in ids
-    assert listed.json()["items"][0]["post_title"] == "评论-帖子"
-    # 后台展示的是对外的 12 位帖子编号，不是自增 ID
+    assert listed.json()["items"][0]["post_title"] == "评论-动态"
+    # 后台展示的是对外的 12 位动态编号，不是自增 ID
     assert listed.json()["items"][0]["post_no"] == post["post_no"]
 
-    # 关键字搜索：评论内容 / 评论人 / 帖子编号都能命中
+    # 关键字搜索：评论内容 / 评论人 / 动态编号都能命中
     searched = client.get(COMMENTS, headers=auth_headers, params={"keyword": "后台可见"})
     assert searched.json()["total"] >= 1
     by_post_no = client.get(
@@ -148,7 +148,7 @@ def test_admin_comment_management(client, auth_headers):
 
 
 def test_commented_posts_and_received_count(client, auth_headers):
-    """我的-评论：只出有已通过评论的帖子（按评论数倒序），计数只算已通过。"""
+    """我的-评论：只出有已通过评论的动态（按评论数倒序），计数只算已通过。"""
     author_id, author = _register_member(client)
     fan_id, fan = _register_member(client)
 
@@ -181,7 +181,7 @@ def test_commented_posts_and_received_count(client, auth_headers):
     assert count.status_code == 200, count.text
     assert count.json()["received_comment_count"] == 2
 
-    # 没发过帖的人 = 0；未登录两个接口都拿不到
+    # 没发过动态的人 = 0；未登录两个接口都拿不到
     assert (
         client.get(f"{POSTS}/received-comments", headers=fan).json()[
             "received_comment_count"

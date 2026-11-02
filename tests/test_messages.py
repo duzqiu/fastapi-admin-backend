@@ -39,7 +39,7 @@ def _register_member(client) -> tuple[int, dict, str]:
     return me["id"], headers, me["nickname"]
 
 
-def _approved_post(client, auth_headers, author_headers, title="消息-帖子") -> dict:
+def _approved_post(client, auth_headers, author_headers, title="消息-动态") -> dict:
     post = client.post(POSTS, headers=author_headers, json={"title": title}).json()
     client.patch(
         f"{POSTS}/{post['id']}/status", headers=auth_headers, json={"status": "approved"}
@@ -98,7 +98,7 @@ def test_like_and_comment_create_messages(client, auth_headers):
 
     types = [item["type"] for item in _messages(client, author)]
     assert "like" in types
-    # 评论还没审核通过：此时不该有「评论了你的帖子」的通知
+    # 评论还没审核通过：此时不该有「评论了你的动态」的通知
     assert "comment" not in types
 
     # 后台审核通过后才通知作者
@@ -111,11 +111,11 @@ def test_like_and_comment_create_messages(client, auth_headers):
     assert "comment" in picked
     assert picked["like"]["post_id"] == post["id"]
     assert fan_name in picked["comment"]["title"]
-    # 文案统一用「动态」，不再出现「帖子」
+    # 文案统一用「动态」，不再出现「动态」
     assert "动态" in picked["like"]["title"]
     assert "动态" in picked["comment"]["title"]
 
-    # 自己赞自己的帖子：不该多出消息
+    # 自己赞自己的动态：不该多出消息
     before = client.get(f"{MESSAGES}/unread-count", headers=author).json()["unread_count"]
     client.post(f"{POSTS}/{post['id']}/like", headers=author)
     after = client.get(f"{MESSAGES}/unread-count", headers=author).json()["unread_count"]
@@ -123,11 +123,11 @@ def test_like_and_comment_create_messages(client, auth_headers):
 
 
 def test_audit_results_create_messages(client, auth_headers):
-    """帖子 / 评论审核结果会通知作者与评论人。"""
+    """动态 / 评论审核结果会通知作者与评论人。"""
     author_id, author, _ = _register_member(client)
     fan_id, fan, _ = _register_member(client)
 
-    post = _approved_post(client, auth_headers, author, title="待审核的帖子")
+    post = _approved_post(client, auth_headers, author, title="待审核的动态")
     comment = client.post(
         f"{POSTS}/{post['id']}/comments", headers=fan, json={"content": "待审评论"}
     ).json()
@@ -142,7 +142,7 @@ def test_audit_results_create_messages(client, auth_headers):
     commenter_types = [item["type"] for item in _messages(client, fan)]
     assert "comment_audit" in commenter_types
 
-    # 帖子审核：新建一条待审核帖子再通过
+    # 动态审核：新建一条待审核动态再通过
     pending = client.post(POSTS, headers=author, json={"title": "第二条"}).json()
     client.patch(
         f"{POSTS}/{pending['id']}/status", headers=auth_headers, json={"status": "approved"}
@@ -152,7 +152,7 @@ def test_audit_results_create_messages(client, auth_headers):
     audit_title = next(
         item["title"] for item in author_items if item["type"] == "post_audit"
     )
-    assert "动态" in audit_title and "帖子" not in audit_title
+    assert "动态" in audit_title
 
 
 @pytest.fixture()
@@ -408,7 +408,7 @@ def test_messages_filter_multiple_types(client, auth_headers):
     types = {item["type"] for item in both.json()["items"]}
     assert types == {"like", "comment"}
 
-    # 系统消息：审核类（帖子审核 + 评论审核）
+    # 系统消息：审核类（动态审核 + 评论审核）
     system = client.get(
         MESSAGES,
         headers=author,

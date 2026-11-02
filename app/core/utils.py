@@ -7,7 +7,7 @@ from typing import Optional
 # 会员编号长度（对外展示的短 ID）
 # 新注册用户用 10 位；早期注册的老用户仍是 6 位，不做回溯修改
 MEMBER_NO_LENGTH = 10
-# 帖子编号长度（对外展示的长 ID）
+# 动态编号长度（对外展示的长 ID）
 POST_NO_LENGTH = 12
 
 
@@ -27,7 +27,7 @@ def generate_member_no(length: int = MEMBER_NO_LENGTH) -> str:
 
 
 def generate_post_no(length: int = POST_NO_LENGTH) -> str:
-    """帖子编号（默认 12 位随机数字）。"""
+    """动态编号（默认 12 位随机数字）。"""
     return generate_numeric_id(length)
 
 
