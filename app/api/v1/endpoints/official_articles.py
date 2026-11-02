@@ -21,8 +21,8 @@ def service(db: Session = Depends(get_db)) -> OfficialArticleService:
 
 
 @router.get("", response_model=PageResult[OfficialArticleOut])
-def list_articles(page_params: PageParams = Depends(), keyword: Optional[str] = Query(None), status: Optional[OfficialArticleStatus] = Query(None), member_id: Optional[int] = Query(None, ge=1), source: Optional[str] = Query(None), svc: OfficialArticleService = Depends(service)):
-    items, total = svc.list(keyword=keyword, status=status.value if status else None, member_id=member_id, source=source, offset=page_params.offset, limit=page_params.page_size)
+def list_articles(page_params: PageParams = Depends(), keyword: Optional[str] = Query(None), status: Optional[OfficialArticleStatus] = Query(None), user_id: Optional[str] = Query(None, description="按「用户 ID」（member_no）筛选"), member_id: Optional[int] = Query(None, ge=1, description="按内部 member_id 筛选（兼容）"), source: Optional[str] = Query(None), svc: OfficialArticleService = Depends(service)):
+    items, total = svc.list(keyword=keyword, status=status.value if status else None, member_id=member_id, user_id=user_id, source=source, offset=page_params.offset, limit=page_params.page_size)
     return PageResult.create(items, total, page_params.page, page_params.page_size)
 
 

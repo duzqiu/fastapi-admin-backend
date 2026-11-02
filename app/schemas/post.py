@@ -68,7 +68,7 @@ class PostOut(ORMBaseModel):
     """动态出参。"""
 
     id: int
-    post_no: str = Field(default="", description="动态编号（12 位随机数字，对外展示的动态 ID）")
+    post_no: str = Field(default="", description="帖子编号（12 位随机数字，对外展示的帖子 ID）")
     publisher: str
     publisher_avatar: str = Field(
         default="", description="发布者头像地址（匿名发动态或未设置头像时为空）"
