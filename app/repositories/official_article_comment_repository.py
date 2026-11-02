@@ -1,6 +1,6 @@
 """官号文章评论的读写（与帖子评论 `PostCommentRepository` 平行）。"""
 
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import func, or_, select
 
@@ -74,6 +74,20 @@ class OfficialArticleCommentRepository(BaseRepository[OfficialArticleComment]):
             offset=offset,
             limit=limit,
         )
+
+    def counts_for(self, article_ids: List[int]) -> Dict[int, int]:
+        """批量取「已通过」评论数（列表页用，避免逐条 count）。"""
+        if not article_ids:
+            return {}
+        stmt = (
+            select(OfficialArticleComment.article_id, func.count())
+            .where(
+                OfficialArticleComment.article_id.in_(list(article_ids)),
+                OfficialArticleComment.status == CommentStatus.APPROVED.value,
+            )
+            .group_by(OfficialArticleComment.article_id)
+        )
+        return {row[0]: int(row[1]) for row in self.db.execute(stmt).all()}
 
     def count_received(self, member_id: int) -> int:
         """某会员名下所有文章的「已通过」评论总数。"""

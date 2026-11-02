@@ -162,6 +162,64 @@ class PostService:
         # 发布人昵称实时取会员当前昵称（库里 publisher 是发动态时的快照）
         self._refresh_post_publishers(posts)
 
+    def _article_dicts(
+        self,
+        articles: List[OfficialArticle],
+        viewer: Optional[Member],
+        comment_counts: Optional[dict] = None,
+    ) -> List[dict]:
+        """官号文章 → 与动态同构的出参字典。
+
+        点赞 / 收藏 / 评论数与「我有没有点过」都用一次 `IN (...)` 批量查回，
+        列表页不会因为混排文章而多出 N 次查询；未登录时互动标记一律为 False。
+        """
+        if not articles:
+            return []
+
+        ids = [int(article.id) for article in articles]
+        like_counts = self.article_likes.counts_for(ids)
+        favorite_counts = self.article_favorites.counts_for(ids)
+        comment_total = (
+            comment_counts
+            if comment_counts is not None
+            else self.article_comments.counts_for(ids)
+        )
+
+        if viewer is not None:
+            liked = self.article_likes.marked_article_ids(viewer.id, ids)
+            favorited = self.article_favorites.marked_article_ids(viewer.id, ids)
+            followed = self.follows.following_ids(viewer.id)
+        else:
+            liked, favorited, followed = set(), set(), set()
+
+        result: List[dict] = []
+        for article in articles:
+            item = article_out(
+                article,
+                like_count=like_counts.get(article.id, 0),
+                favorite_count=favorite_counts.get(article.id, 0),
+                comment_count=comment_total.get(article.id, 0),
+                is_liked=article.id in liked,
+                is_favorited=article.id in favorited,
+            )
+            item["is_following"] = bool(article.member_id) and article.member_id in followed
+            result.append(item)
+        return result
+
+    def _article_or_404(self, article_id: int) -> OfficialArticle:
+        """取一篇**已通过**的官号文章；不存在 / 未过审都按 404 处理。"""
+        article = self.articles.get_public(article_id)
+        if article is None:
+            raise NotFoundError(
+                f"动态不存在: id={ARTICLE_ID_OFFSET + int(article_id)}"
+            )
+        return article
+
+    def _public_article(self, article_id: int, viewer: Optional[Member]) -> dict:
+        """官号文章详情（出参形状与动态一致）。"""
+        article = self._article_or_404(article_id)
+        return self._article_dicts([article], viewer)[0]
+
     def _generate_post_no(self) -> str:
         """生成一个未被占用的 12 位随机动态编号。
 
@@ -352,7 +410,17 @@ class PostService:
         return picked
 
     def record_view(self, post_id: int) -> Post:
-        """记录一次访问（详情页打开时调用），返回带最新 `view_count` 的帖子。"""
+        """记录一次访问（详情页打开时调用），返回带最新 `view_count` 的内容。
+
+        `post_id` 带文章偏移时统计官号文章的访问量。
+        """
+        if is_article_id(post_id):
+            article = self._article_or_404(article_id_from(post_id))
+            self.articles.increment_view(article.id)
+            self.db.commit()
+            self.db.refresh(article)
+            return self._article_dicts([article], None)[0]
+
         post = self.get_or_404(post_id)
         self.posts.increment_view(post.id)
         self.db.commit()
@@ -456,8 +524,11 @@ class PostService:
     def like(self, post_id: int, member: Member) -> Post:
         """给帖子点赞（幂等）：重复点赞不会报错，也不会多出记录。
 
-        和收藏一样，只允许给审核通过的帖子点赞。
+        和收藏一样，只允许给审核通过的帖子点赞；`post_id` 带文章偏移时操作官号文章。
         """
+        if is_article_id(post_id):
+            return self._like_article(article_id_from(post_id), member)
+
         post = self.get_or_404(post_id)
         if post.status != PostStatus.APPROVED.value:
             raise BusinessError("只能给审核通过的动态点赞")
@@ -522,8 +593,10 @@ class PostService:
         return post
 
     def received_likes(self, member_id: int) -> int:
-        """某会员的获赞总数：自己所有帖子被点赞的次数合计。"""
-        return self.likes.count_received(member_id)
+        """某会员的获赞总数：自己所有动态 + 官号文章被点赞的次数合计。"""
+        return self.likes.count_received(member_id) + self.article_likes.count_received(
+            member_id
+        )
 
     def list_received_like_posts(
         self,
@@ -534,6 +607,8 @@ class PostService:
         viewer: Optional[Member] = None,
     ) -> Tuple[List[Post], int]:
         """「获赞的帖子」列表：我发布的、收到过赞的帖子，按获赞数倒序。"""
+        offset = (page - 1) * page_size
+        fetch = offset + page_size
         items, total = self.likes.list_posts_with_received_likes(
             member_id,
             offset=0,
@@ -661,6 +736,18 @@ class PostService:
         # 评论通知不在这里发：等后台审核通过、真正展示给作者时再发
         return item
 
+    def list_article_comments(
+        self, article_id: int, *, page: int = 1, page_size: int = 20
+    ):
+        """官号文章下**已通过**的评论（出参形状与帖子评论一致）。"""
+        self._article_or_404(article_id)
+        items, total = self.article_comments.list_by_article(
+            article_id,
+            offset=(page - 1) * page_size,
+            limit=page_size,
+        )
+        return [self._article_comment_out(item) for item in items], total
+
     def _article_comment_out(self, item) -> dict:
         """文章评论出参：`id` / `post_id` 都带偏移，与帖子评论同一套 id 空间。"""
         return {
@@ -697,7 +784,15 @@ class PostService:
     def list_comments(
         self, post_id: int, *, page: int = 1, page_size: int = 20
     ) -> Tuple[List[PostComment], int]:
-        """某条帖子下**已通过**的评论（前台详情页用），最新的在前。"""
+        """某条帖子下**已通过**的评论（前台详情页用），最新的在前。
+
+        `post_id` 带文章偏移时返回官号文章下的评论（出参形状与帖子评论一致）。
+        """
+        if is_article_id(post_id):
+            return self.list_article_comments(
+                article_id_from(post_id), page=page, page_size=page_size
+            )
+
         self.get_or_404(post_id)
         items, total = self.comments.list_by_post(
             post_id,
@@ -873,8 +968,10 @@ class PostService:
         self.db.commit()
 
     def received_comments(self, member_id: int) -> int:
-        """某会员的被评论总数：自己所有帖子收到的已通过评论合计。"""
-        return self.comments.count_received(member_id)
+        """某会员的被评论总数：自己所有动态 + 官号文章收到的已通过评论合计。"""
+        return self.comments.count_received(
+            member_id
+        ) + self.article_comments.count_received(member_id)
 
     def list_commented_posts(
         self,
@@ -885,6 +982,8 @@ class PostService:
         viewer: Optional[Member] = None,
     ) -> Tuple[List[Post], int]:
         """「被评论的帖子」列表：我发布的、收到过已通过评论的帖子，按评论数倒序。"""
+        offset = (page - 1) * page_size
+        fetch = offset + page_size
         items, total = self.comments.list_posts_with_comments(
             member_id,
             offset=0,
