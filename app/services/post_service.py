@@ -8,6 +8,7 @@ from datetime import timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from fastapi import UploadFile
+from sqlalchemy import func, literal, select, union_all
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 
@@ -16,9 +17,22 @@ from app.core.logging import logger
 from app.core.storage import save_image
 from app.core.utils import generate_post_no, utcnow
 from app.models.member import Member
-from app.models.official_article import OfficialArticle, OfficialArticleStatus
+from app.models.official_article import (
+    OfficialArticle,
+    OfficialArticleComment,
+    OfficialArticleFavorite,
+    OfficialArticleLike,
+    OfficialArticleStatus,
+)
 from app.models.message import MessageType
-from app.models.post import CommentStatus, Post, PostComment, PostStatus
+from app.models.post import (
+    CommentStatus,
+    Post,
+    PostComment,
+    PostFavorite,
+    PostLike,
+    PostStatus,
+)
 from app.repositories.member_repository import MemberFollowRepository
 from app.models.official_article import ARTICLE_ID_OFFSET
 from app.services.article_feed import (
@@ -127,6 +141,97 @@ class PostService:
         except Exception:  # noqa: BLE001 - 通知失败不该影响业务
             logger.warning("写入站内消息失败: type=%s", msg_type, exc_info=True)
 
+    @staticmethod
+    def _split_counts(rows) -> Tuple[Dict[int, int], Dict[int, int], Dict[int, int]]:
+        """把 UNION ALL 的结果拆成 (点赞数, 收藏数, 评论数) 三个字典。"""
+        likes: Dict[int, int] = {}
+        favorites: Dict[int, int] = {}
+        comments: Dict[int, int] = {}
+        targets = {"like": likes, "favorite": favorites, "comment": comments}
+        for kind, ref_id, total in rows:
+            target = targets.get(str(kind))
+            if target is not None:
+                target[int(ref_id)] = int(total)
+        return likes, favorites, comments
+
+    def _post_counts(
+        self, ids: List[int]
+    ) -> Tuple[Dict[int, int], Dict[int, int], Dict[int, int]]:
+        """动态的点赞 / 收藏 / 评论计数合并成一次查询。
+
+        分开查要三次往返，列表页每次多付两次网络延迟；UNION ALL 后
+        每个分支仍按 post_id 走索引，结果与分别查完全一致。
+        """
+        if not ids:
+            return {}, {}, {}
+        id_list = list(ids)
+        rows = self.db.execute(
+            union_all(
+                select(
+                    literal("like").label("kind"),
+                    PostLike.post_id.label("ref_id"),
+                    func.count().label("total"),
+                )
+                .where(PostLike.post_id.in_(id_list))
+                .group_by(PostLike.post_id),
+                select(
+                    literal("favorite").label("kind"),
+                    PostFavorite.post_id.label("ref_id"),
+                    func.count().label("total"),
+                )
+                .where(PostFavorite.post_id.in_(id_list))
+                .group_by(PostFavorite.post_id),
+                select(
+                    literal("comment").label("kind"),
+                    PostComment.post_id.label("ref_id"),
+                    func.count().label("total"),
+                )
+                .where(
+                    PostComment.post_id.in_(id_list),
+                    PostComment.status == CommentStatus.APPROVED.value,
+                )
+                .group_by(PostComment.post_id),
+            )
+        ).all()
+        return self._split_counts(rows)
+
+    def _article_counts(
+        self, ids: List[int]
+    ) -> Tuple[Dict[int, int], Dict[int, int], Dict[int, int]]:
+        """官号文章的点赞 / 收藏 / 评论计数，同样合并成一次查询。"""
+        if not ids:
+            return {}, {}, {}
+        id_list = [int(value) for value in ids]
+        rows = self.db.execute(
+            union_all(
+                select(
+                    literal("like").label("kind"),
+                    OfficialArticleLike.article_id.label("ref_id"),
+                    func.count().label("total"),
+                )
+                .where(OfficialArticleLike.article_id.in_(id_list))
+                .group_by(OfficialArticleLike.article_id),
+                select(
+                    literal("favorite").label("kind"),
+                    OfficialArticleFavorite.article_id.label("ref_id"),
+                    func.count().label("total"),
+                )
+                .where(OfficialArticleFavorite.article_id.in_(id_list))
+                .group_by(OfficialArticleFavorite.article_id),
+                select(
+                    literal("comment").label("kind"),
+                    OfficialArticleComment.article_id.label("ref_id"),
+                    func.count().label("total"),
+                )
+                .where(
+                    OfficialArticleComment.article_id.in_(id_list),
+                    OfficialArticleComment.status == CommentStatus.APPROVED.value,
+                )
+                .group_by(OfficialArticleComment.article_id),
+            )
+        ).all()
+        return self._split_counts(rows)
+
     def _mark_interactions(self, posts: List[Post], member: Optional[Member]) -> None:
         """给动态标上「是否已点赞 / 收藏」和「被点赞 / 收藏次数」。
 
@@ -136,10 +241,9 @@ class PostService:
         都用一次 `IN (...)` 批量查询取回，列表页不会因此多出 N 次查询。
         """
         ids = [post.id for post in posts if post.id]
-        like_counts = self.likes.counts_for(ids)
-        favorite_counts = self.favorites.counts_for(ids)
-        # 评论数只算「已通过」的（前台看到的条数）
-        comment_counts = self.comments.counts_for(ids)
+        # 点赞 / 收藏 / 评论（已通过）三项计数合并成一次 UNION ALL，
+        # 原来要三次往返，列表页每次多付两次网络延迟。
+        like_counts, favorite_counts, comment_counts = self._post_counts(ids)
         liked = (
             self.likes.liked_post_ids(member.id, ids)
             if member is not None and ids
@@ -177,12 +281,10 @@ class PostService:
             return []
 
         ids = [int(article.id) for article in articles]
-        like_counts = self.article_likes.counts_for(ids)
-        favorite_counts = self.article_favorites.counts_for(ids)
+        # 三项计数一次 UNION ALL 查回；调用方已给评论数时以传入的为准
+        like_counts, favorite_counts, computed_comments = self._article_counts(ids)
         comment_total = (
-            comment_counts
-            if comment_counts is not None
-            else self.article_comments.counts_for(ids)
+            comment_counts if comment_counts is not None else computed_comments
         )
 
         if viewer is not None:
@@ -444,15 +546,17 @@ class PostService:
         """
         if is_article_id(post_id):
             article = self._article_or_404(article_id_from(post_id))
-            self.articles.increment_view(article.id)
+            views = self.articles.increment_view(article.id)
             self.db.commit()
-            self.db.refresh(article)
+            # 会话是 expire_on_commit=False：直接把自增后的值写回对象，
+            # 省掉一次 refresh 的 SELECT（详情页每次打开都会走这里）
+            set_committed_value(article, "view_count", views)
             return self._article_dicts([article], None)[0]
 
         post = self.get_or_404(post_id)
-        self.posts.increment_view(post.id)
+        views = self.posts.increment_view(post.id)
         self.db.commit()
-        self.db.refresh(post)
+        set_committed_value(post, "view_count", views)
         return post
 
     def list_member_posts(

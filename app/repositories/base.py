@@ -42,6 +42,13 @@ class BaseRepository(Generic[ModelType]):
             stmt = stmt.where(getattr(self.model, field) == value)
         return bool(self.db.execute(stmt).scalar_one())
 
+    def _supports_window_count(self) -> bool:
+        """当前方言是否支持 `count(*) over()`（SQLite 3.25+ / PostgreSQL）。"""
+        bind = self.db.get_bind()
+        name = bind.dialect.name if bind is not None else ""
+        # MySQL 要看版本（8.0+ 才支持窗口函数），这里走保守路径
+        return name in ("sqlite", "postgresql")
+
     def list(
         self,
         *,
@@ -50,24 +57,42 @@ class BaseRepository(Generic[ModelType]):
         offset: int = 0,
         limit: int = 10,
     ) -> Tuple[List[ModelType], int]:
-        """分页查询，返回 (数据列表, 总条数)。"""
+        """分页查询，返回 (数据列表, 总条数)。
+
+        有数据时用窗口函数把 `count(*)` 和数据合成**一次**查询，省掉一次数据库往返；
+        结果为空（拿不到窗口值）或不支持窗口函数的方言，退回「先 count 再取数据」。
+        """
         conditions = list(conditions or [])
 
-        count_stmt = select(func.count()).select_from(self.model)
-        stmt: Select = select(self.model)
-        for condition in conditions:
-            count_stmt = count_stmt.where(condition)
-            stmt = stmt.where(condition)
+        def _filter(stmt: Select) -> Select:
+            for condition in conditions:
+                stmt = stmt.where(condition)
+            return stmt
 
-        total = int(self.db.execute(count_stmt).scalar_one())
-
-        if order_by is not None:
+        def _ordered(stmt: Select) -> Select:
+            if order_by is None:
+                return stmt
             # 支持传入单个表达式或 (list/tuple) 多字段组合
             if isinstance(order_by, (list, tuple)):
-                stmt = stmt.order_by(*order_by)
-            else:
-                stmt = stmt.order_by(order_by)
-        stmt = stmt.offset(offset).limit(limit)
+                return stmt.order_by(*order_by)
+            return stmt.order_by(order_by)
+
+        if self._supports_window_count():
+            stmt = _filter(
+                select(self.model, func.count().over().label("total_count"))
+            )
+            stmt = _ordered(stmt).offset(offset).limit(limit)
+            rows = self.db.execute(stmt).unique().all()
+            if rows:
+                return [row[0] for row in rows], int(rows[0][1])
+
+        count_stmt = _filter(select(func.count()).select_from(self.model))
+        total = int(self.db.execute(count_stmt).scalar_one())
+        if self._supports_window_count():
+            # 上面已经查过这一页，确实没有数据
+            return [], total
+
+        stmt = _ordered(_filter(select(self.model))).offset(offset).limit(limit)
         items = list(self.db.execute(stmt).scalars().unique().all())
         return items, total
 
