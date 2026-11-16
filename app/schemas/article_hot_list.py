@@ -76,8 +76,9 @@ class HotListItemOut(ORMBaseModel):
     source: str
     name: str
     heat: Optional[str] = None
-    tabs: List[str] = Field(default_factory=list)
+    tags: List[str] = Field(default_factory=list)
     rank: Optional[str] = None
+    is_active: bool = Field(default=True, description="是否启用；False 表示已不在最新榜单中")
     created_at: datetime
     updated_at: datetime
 
@@ -87,28 +88,28 @@ class HotListItemOut(ORMBaseModel):
         """外部写入的可能是数字，统一按文本输出。"""
         return None if value is None else str(value)
 
-    @field_validator("tabs", mode="before")
+    @field_validator("tags", mode="before")
     @classmethod
-    def coerce_tabs(cls, value: Any) -> List[str]:
+    def coerce_tags(cls, value: Any) -> List[str]:
         """老数据可能是 NULL 或分号串，兜底成数组，避免整页 500。"""
         return normalize_tags(split_tags(value))
 
 
 class HotListBoardOut(BaseModel):
-    """一个渠道的榜单：`count` 是该渠道的总条数，`items` 受 `limit` 限制。"""
+    """一个渠道的榜单：`count` 是该渠道**启用中**的条数，`items` 受 `limit` 限制。"""
 
     source: str = Field(..., description="渠道")
-    count: int = Field(..., ge=0, description="该渠道在数据库里的条目总数")
+    count: int = Field(..., ge=0, description="该渠道启用中的条目数")
     items: List[HotListItemOut] = Field(
         default_factory=list, description="热搜榜单条目（按入库顺序，即抓取到的排序）"
     )
 
 
 class HotListSourceOut(BaseModel):
-    """可用渠道 + 该渠道的条目数（前台画渠道页签用）。"""
+    """可用渠道 + 该渠道启用中的条目数（前台画渠道页签用）。"""
 
     source: str = Field(..., description="渠道")
-    count: int = Field(..., ge=0, description="该渠道的条目总数")
+    count: int = Field(..., ge=0, description="该渠道启用中的条目数")
 
 
 class HotListItemUpdate(BaseModel):
@@ -119,8 +120,11 @@ class HotListItemUpdate(BaseModel):
     source: Optional[SourceText] = None
     name: Optional[NameText] = None
     heat: Optional[HeatText] = None
-    tabs: Optional[List[TagText]] = Field(default=None, max_length=MAX_TAGS)
+    tags: Optional[List[TagText]] = Field(default=None, max_length=MAX_TAGS)
     rank: Optional[RankText] = None
+    is_active: Optional[bool] = Field(
+        default=None, description="是否启用：false 表示该条已不在最新榜单中"
+    )
 
     @field_validator("heat", "rank", mode="before")
     @classmethod
@@ -130,7 +134,7 @@ class HotListItemUpdate(BaseModel):
             return None
         return value
 
-    @field_validator("tabs", mode="before")
+    @field_validator("tags", mode="before")
     @classmethod
     def normalize_tab_list(cls, value: Any) -> Any:
         if value is None:
@@ -148,4 +152,6 @@ class HotListItemUpdate(BaseModel):
         for field, label in (("source", "渠道"), ("name", "标题")):
             if field in self.model_fields_set and getattr(self, field) is None:
                 raise ValueError(f"{label}不能为空")
+        if "is_active" in self.model_fields_set and self.is_active is None:
+            raise ValueError("启用状态不能为空")
         return self

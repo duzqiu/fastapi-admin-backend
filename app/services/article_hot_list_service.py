@@ -33,10 +33,11 @@ class HotListService:
     def board(
         self, source: str, *, limit: int = 50
     ) -> Tuple[List[HotListItem], int]:
-        """按渠道取榜单：返回 (条目列表, 该渠道的总条数)。
+        """按渠道取榜单：返回 (启用中的条目列表, 该渠道启用条数)。
 
-        渠道不存在 / 还没抓到数据时不报错，返回空榜单（`count = 0`），
-        前台可以直接渲染「暂无数据」。
+        已从最新榜单消失（`is_active=False`）的条目不对外返回；这些历史数据
+        仍保留在库里，后台可以查看和重新启用。
+        渠道不存在 / 还没抓到数据时不报错，返回空榜单（`count = 0`）。
         """
         name = self.normalize_source(source)
         if not name:
@@ -44,7 +45,7 @@ class HotListService:
         return self.items.board_page(name, offset=0, limit=limit)
 
     def sources(self) -> List[Tuple[str, int]]:
-        """当前库里有哪些渠道，各自多少条。"""
+        """当前库里有哪些渠道，各自有多少条启用中的条目。"""
         return self.items.source_counts()
 
     # ------------------------- 后台 -------------------------

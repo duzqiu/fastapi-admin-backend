@@ -29,7 +29,7 @@ def add_items(session, source: str, count: int = 3, **overrides) -> list:
             source=source,
             name=f"{source}-条目-{index}-{uuid.uuid4().hex[:6]}",
             heat=f"{index + 1}28.6万",
-            tabs=["热"] if index == 0 else [],
+            tags=["热"] if index == 0 else [],
             rank=str(index + 1),
         )
         for key, value in overrides.items():
@@ -59,19 +59,20 @@ def test_public_board_returns_source_count_and_all_fields(client, db):
         "source",
         "name",
         "heat",
-        "tabs",
+        "tags",
         "rank",
+        "is_active",
         "created_at",
         "updated_at",
     }
-    assert first["tabs"] == ["热"]
+    assert first["tags"] == ["热"]
     assert first["rank"] == "1"
     assert first["heat"].endswith("万")
 
 
 def test_public_board_keeps_text_rank_and_limit_only_caps_items(client, db):
     source = unique_source("weibo")
-    add_items(db, source, count=2, rank="置顶", heat=None, tabs=[])
+    add_items(db, source, count=2, rank="置顶", heat=None, tags=[])
 
     body = client.get(PUBLIC_API, params={"source": source, "limit": 1}).json()
     assert body["count"] == 2, "count 是渠道总条数，不跟 limit 走"
@@ -79,7 +80,7 @@ def test_public_board_keeps_text_rank_and_limit_only_caps_items(client, db):
     item = body["items"][0]
     assert item["rank"] == "置顶", "排名原样保存，允许非数字"
     assert item["heat"] is None
-    assert item["tabs"] == []
+    assert item["tags"] == []
 
 
 def test_public_board_unknown_source_is_empty_not_404(client, db):
@@ -159,29 +160,29 @@ def test_admin_update_is_partial_and_can_clear_optional_fields(client, db, auth_
     response = client.put(
         url,
         headers=auth_headers,
-        json={"name": "新的标题", "tabs": "热,新", "rank": "2"},
+        json={"name": "新的标题", "tags": "热,新", "rank": "2"},
     )
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["name"] == "新的标题"
-    assert body["tabs"] == ["热", "新"]
+    assert body["tags"] == ["热", "新"]
     assert body["rank"] == "2"
     assert body["source"] == source, "没传的字段保持原值"
     assert body["heat"] == item.heat, "没传的字段保持原值"
 
     cleared = client.put(
-        url, headers=auth_headers, json={"heat": "", "rank": None, "tabs": []}
+        url, headers=auth_headers, json={"heat": "", "rank": None, "tags": []}
     )
     assert cleared.status_code == 200, cleared.text
     assert cleared.json()["heat"] is None
     assert cleared.json()["rank"] is None
-    assert cleared.json()["tabs"] == []
+    assert cleared.json()["tags"] == []
 
     for payload in (
         {"name": "   "},
         {"source": None},
         {"unknown_field": 1},
-        {"tabs": [f"t{index}" for index in range(21)]},
+        {"tags": [f"t{index}" for index in range(21)]},
         {"rank": "x" * 21},
     ):
         response = client.put(url, headers=auth_headers, json=payload)
@@ -197,7 +198,7 @@ def test_admin_detail_and_delete(client, db, auth_headers):
     detail = client.get(url, headers=auth_headers)
     assert detail.status_code == 200, detail.text
     assert detail.json()["id"] == item.id
-    assert detail.json()["tabs"] == ["热"]
+    assert detail.json()["tags"] == ["热"]
 
     assert client.delete(url, headers=auth_headers).status_code == 200
     assert client.get(url, headers=auth_headers).status_code == 404
@@ -210,8 +211,70 @@ def test_article_hot_list_has_no_create_endpoint(client, auth_headers):
         "source": "baidu",
         "name": "不该被创建",
         "heat": None,
-        "tabs": [],
+        "tags": [],
         "rank": "1",
     }
     assert client.post(ADMIN_API, headers=auth_headers, json=payload).status_code == 405
     assert client.post(PUBLIC_API, json=payload).status_code == 405
+
+def test_public_board_hides_disabled_items(client, db):
+    """已从最新榜单消失（is_active=False）的条目不再对外返回，但计数按启用条数。"""
+    source = unique_source()
+    add_items(db, source, count=3)
+    [disabled] = add_items(db, source, count=1, is_active=False)
+
+    body = client.get(PUBLIC_API, params={"source": source}).json()
+    assert body["count"] == 3
+    ids = [item["id"] for item in body["items"]]
+    assert disabled.id not in ids
+
+
+def test_public_sources_counts_only_active_items(client, db):
+    first = unique_source("active-a")
+    add_items(db, first, count=2)
+    add_items(db, first, count=1, is_active=False)
+
+    mapping = {
+        row["source"]: row["count"] for row in client.get(f"{PUBLIC_API}/sources").json()
+    }
+    assert mapping[first] == 2
+
+
+def test_admin_list_includes_disabled_and_filters_by_status(client, db, auth_headers):
+    source = unique_source()
+    add_items(db, source, count=2)
+    add_items(db, source, count=3, is_active=False)
+
+    everything = client.get(
+        ADMIN_API, headers=auth_headers, params={"source": source}
+    ).json()
+    assert everything["total"] == 5
+
+    enabled = client.get(
+        ADMIN_API, headers=auth_headers, params={"source": source, "is_active": "true"}
+    ).json()
+    assert enabled["total"] == 2
+    assert all(item["is_active"] is True for item in enabled["items"])
+
+    disabled = client.get(
+        ADMIN_API, headers=auth_headers, params={"source": source, "is_active": "false"}
+    ).json()
+    assert disabled["total"] == 3
+    assert all(item["is_active"] is False for item in disabled["items"])
+
+
+def test_admin_can_toggle_status(client, db, auth_headers):
+    source = unique_source()
+    [item] = add_items(db, source, count=1)
+    url = f"{ADMIN_API}/{item.id}"
+
+    off = client.put(url, headers=auth_headers, json={"is_active": False})
+    assert off.status_code == 200, off.text
+    assert off.json()["is_active"] is False
+    assert client.get(PUBLIC_API, params={"source": source}).json()["count"] == 0
+
+    on = client.put(url, headers=auth_headers, json={"is_active": True})
+    assert on.json()["is_active"] is True
+    assert client.get(PUBLIC_API, params={"source": source}).json()["count"] == 1
+
+    assert client.put(url, headers=auth_headers, json={"is_active": None}).status_code == 422

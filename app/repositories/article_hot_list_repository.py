@@ -20,22 +20,26 @@ class HotListRepository(BaseRepository[HotListItem]):
     def board_page(
         self, source: str, *, offset: int = 0, limit: int = 50
     ) -> Tuple[List[HotListItem], int]:
-        """某个渠道的榜单条目（按入库顺序）+ 该渠道的总条数。
+        """某个渠道**启用中**的榜单条目（按入库顺序）+ 启用条数。
 
         排序用 `id`：爬虫按页面从上到下写入，入库顺序就是页面展示顺序；
         而 `rank` 是原始文本（可能是「置顶」），没法直接按数值排。
         """
         return self.list(
-            conditions=[HotListItem.source == source],
+            conditions=[
+                HotListItem.source == source,
+                HotListItem.is_active.is_(True),
+            ],
             order_by=(HotListItem.id.asc(),),
             offset=offset,
             limit=limit,
         )
 
     def source_counts(self) -> List[Tuple[str, int]]:
-        """每个渠道各有多少条（渠道按字母序）。"""
+        """每个渠道各有多少条启用中的条目（渠道按字母序）。"""
         stmt = (
             select(HotListItem.source, func.count())
+            .where(HotListItem.is_active.is_(True))
             .group_by(HotListItem.source)
             .order_by(HotListItem.source.asc())
         )
@@ -47,10 +51,11 @@ class HotListRepository(BaseRepository[HotListItem]):
         *,
         keyword: Optional[str] = None,
         source: Optional[str] = None,
+        is_active: Optional[bool] = None,
         offset: int = 0,
         limit: int = 10,
     ) -> Tuple[List[HotListItem], int]:
-        """后台列表：关键词模糊搜（标题 / 渠道 / 热度 / 排名）+ 渠道精确筛选。"""
+        """后台列表：关键词模糊搜（标题 / 渠道 / 热度 / 排名）+ 渠道与状态筛选。"""
         conditions: List[Any] = []
         if keyword and keyword.strip():
             like = f"%{keyword.strip()}%"
@@ -64,6 +69,8 @@ class HotListRepository(BaseRepository[HotListItem]):
             )
         if source and source.strip():
             conditions.append(HotListItem.source == source.strip())
+        if is_active is not None:
+            conditions.append(HotListItem.is_active.is_(is_active))
         return self.list(
             conditions=conditions,
             order_by=(HotListItem.source.asc(), HotListItem.id.asc()),

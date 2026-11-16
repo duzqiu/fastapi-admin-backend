@@ -6,13 +6,14 @@
 1. `create_tables()` 建出缺失的表；
 2. `drop_legacy_tables()` 删除已下线功能（菜品管理 / 待办）遗留的表
    （见 app/db/legacy_cleanup.py，可用 `DROP_LEGACY_TABLES=false` 关闭）；
-3. `sync_missing_columns()` 把模型里新增、库里还没有的**列**补上
+3. `sync_dropped_columns()` 删除已登记的历史废弃列（如 `article_hot_list_info.tabs`）；
+4. `sync_missing_columns()` 把模型里新增、库里还没有的**列**补上，
+   `sync_missing_indexes()` 再补齐缺失的索引
    （见 app/db/schema_sync.py）—— 于是「拉代码 → 重建镜像 → 起服务」即可，
    不需要任何人手工执行迁移命令。
 
-只加列能覆盖绝大多数「加字段」的迭代；字符串列**放宽长度**也会自动处理
-（`sync_column_types`，只放宽不放窄）；改类型 / 删列 / 加约束这类变更仍要走
-Alembic（`python -m alembic upgrade head`，见 README 第十一节）。
+加列 / 放宽长度能覆盖绝大多数迭代；删列只限 `COLUMN_DROPS` 里登记过的废弃列，
+其余改类型 / 删列 / 加约束仍要走 Alembic（`python -m alembic upgrade head`，见 README 第十一节）。
 """
 
 from datetime import date
@@ -28,7 +29,12 @@ from app.core.site_password import hash_site_password
 from app.core.utils import generate_member_no, utcnow
 from app.db.base import Base
 from app.db.legacy_cleanup import drop_legacy_tables
-from app.db.schema_sync import sync_column_types, sync_missing_columns
+from app.db.schema_sync import (
+    sync_column_types,
+    sync_dropped_columns,
+    sync_missing_columns,
+    sync_missing_indexes,
+)
 from app.db.session import SessionLocal, engine
 from app.models import (  # noqa: F401  确保模型已注册
     EmailCode,
@@ -191,9 +197,14 @@ def init_db() -> None:
         create_tables()
         # 下线功能清库：删除菜品管理 / 待办遗留的表（白名单，删前请备份）。
         drop_legacy_tables(engine)
+        # 老库兜底：先删掉已登记的历史废弃列（如 tabs），再按模型补列。
+        # 顺序很重要：先删，补列逻辑才能把新列（tags）建出来。
+        sync_dropped_columns(engine)
         # 老库兜底：模型里新增、库里还没有的列，在这里补上（只加列）。
         # 有它，「拉代码 → 重建镜像 → 起服务」就够了，不必手工跑迁移。
         sync_missing_columns(engine)
+        # 老库兜底：模型里新增、库里还没有的索引，也一并补上。
+        sync_missing_indexes(engine)
         # 老库兜底：字符串列长度不够时自动放宽（例如会员编号 6 -> 10 位）。
         # 只放宽不放窄，老用户的 6 位编号原样保留。
         sync_column_types(engine)

@@ -16,7 +16,9 @@ from app.db.base import Base
 from app.db.schema_sync import (
     _widen_column_sql,
     sync_column_types,
+    sync_dropped_columns,
     sync_missing_columns,
+    sync_missing_indexes,
 )
 from app.db.session import build_engine
 
@@ -146,3 +148,36 @@ def test_sync_column_types_is_noop_on_sqlite(tmp_path):
 
     assert sync_column_types(engine) == []
 
+
+def test_sync_drops_legacy_tabs_column(tmp_path):
+    """老库残留的 tabs 列会被直接删除，tags 列的缺失由补列逻辑补齐。"""
+    engine = build_engine(f"sqlite:///{(tmp_path / 'drop.db').as_posix()}")
+    Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE article_hot_list_info RENAME COLUMN tags TO tabs"
+        )
+
+    assert sync_dropped_columns(engine) == ["article_hot_list_info.tabs"]
+    assert sync_dropped_columns(engine) == []
+
+    # 删掉旧列后，模型里定义的 tags 由补列逻辑重新建出
+    assert sync_missing_columns(engine) == ["article_hot_list_info.tags"]
+    with engine.begin() as connection:
+        columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(article_hot_list_info)")
+        }
+    assert "tabs" not in columns
+    assert "tags" in columns
+
+
+def test_sync_creates_missing_index_only_once(tmp_path):
+    """老库缺索引时补上；结构已一致时不产生 DDL。"""
+    engine = build_engine(f"sqlite:///{(tmp_path / 'index.db').as_posix()}")
+    Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql("DROP INDEX ix_article_hot_list_info_is_active")
+
+    assert "ix_article_hot_list_info_is_active" in sync_missing_indexes(engine)
+    assert sync_missing_indexes(engine) == []

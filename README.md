@@ -38,13 +38,13 @@
 | 能力 | 说明 |
 | --- | --- |
 | 双账号体系 | 后台账号（管理员创建、带角色）与会员（邮箱自助注册），JWT 按 `scope` 隔离 |
-| 内容 | 用户动态（发布 / 审核 / 点赞 / 收藏 / 评论）、官号文章（独立域，与动态同流展示）、热搜榜单（渠道 / 标题 / 热度 / 标签 / 排名） |
+| 内容 | 用户动态（发布 / 审核 / 点赞 / 收藏 / 评论）、官号文章（独立域，与动态同流展示）、热搜榜单（渠道 / 标题 / 热度 / 标签 / 排名 / 启用状态） |
 | 社交 | 关注（关注流 / 关注列表）、站内消息（评论 / 点赞 / 审核结果 / 公告）、未读数 |
 | 个人网站 | 六组简历数据（个人信息 / 教育 / 工作 / 项目 / 评价 / 技能标签）+ 对外合并接口 |
 | 站点设置 | 首页欢迎语三件套、「关于我」访问密码（bcrypt） |
 | 媒体 | 头像 / 背景图 / 动态图 / 简历头像上传，魔术字节校验、长边压缩、HEIC 自动转 JPEG |
 | 基础设施 | 统一配置、统一异常与错误码、统一分页、请求日志（`X-Request-Id`）、CORS、SMTP、Alembic |
-| 结构自愈 | 启动时自动建表、补列、放宽列长度；下线功能遗留表按白名单清理 |
+| 结构自愈 | 启动时自动建表、补列、补索引、放宽列长度、删除已登记的废弃列；下线功能遗留表按白名单清理 |
 
 分层原则：**接口层只收参**、**服务层管业务与事务**、**仓储层管数据**，
 横切能力（配置 / 安全 / 日志 / 异常 / 存储）集中在 `app/core`。
@@ -128,7 +128,7 @@ fastapi-admin-backend/
 │   │   ├── base.py                  DeclarativeBase
 │   │   ├── session.py               引擎（自动适配 SQLite/PG/MySQL）、SessionLocal、get_db
 │   │   ├── init_db.py               建表 + 删遗留表 + 补列 + 初始管理员/演示会员/站点设置（幂等）
-│   │   ├── schema_sync.py           自动补列、自动放宽字符串长度（只加/只放宽）
+│   │   ├── schema_sync.py           自动补列 / 补索引 / 放宽字符串长度 / 删除登记过的废弃列
 │   │   └── legacy_cleanup.py        按白名单删除下线功能遗留表（8 张）
 │   │
 │   ├── models/                      ★ ORM（表名规范：一级_二级_功能）
@@ -474,13 +474,14 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 | --- | --- | --- | --- |
 | GET | `/hot-lists` | 按渠道出榜：`?source=baidu&limit=50`，返回 `{ source, count, items }` | 公开 |
 | GET | `/hot-lists/sources` | 可用渠道及各渠道条数 | 公开 |
-| GET | `/hot-lists/admin` | 热搜榜单条目列表（全字段，分页 + `keyword` / `source`） | 管理员 |
+| GET | `/hot-lists/admin` | 热搜榜单条目列表（全字段，分页 + `keyword` / `source` / `is_active`） | 管理员 |
 | GET | `/hot-lists/admin/{id}` | 条目详情 | 管理员 |
-| PUT | `/hot-lists/admin/{id}` | 编辑条目（`source` / `name` / `heat` / `tabs` / `rank`，按字段更新） | 管理员 |
+| PUT | `/hot-lists/admin/{id}` | 编辑条目（`source` / `name` / `heat` / `tags` / `rank` / `is_active`，按字段更新） | 管理员 |
 | DELETE | `/hot-lists/admin/{id}` | 删除条目 | 管理员 |
 
 > **没有新增接口**：条目由爬虫项目 `scrapy-hotList-crawler` 写入，后台不提供「发布」入口。
-> `count` 是该渠道在库里的**总条数**，不受 `limit` 影响；渠道没有数据时返回 `count = 0` 的空榜单，不是 404。
+> `count` 是该渠道**启用中**的条数，不受 `limit` 影响；已从最新榜单消失的条目（`is_active=false`）
+> 不对外返回，但保留在库里供后台查看。渠道没有数据时返回 `count = 0` 的空榜单，不是 404。
 
 ### 站内消息 `/messages`
 
@@ -662,22 +663,31 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 | `source` | `String(50)`，索引 | 渠道，如 `baidu`、`weibo`、`中国新闻网` |
 | `name` | `String(200)`，索引 | 单条热搜的标题（不是榜单名称） |
 | `heat` | `String(50)`，可空 | 原始热度文本，如 `128.6万`；没有热度为 NULL |
-| `tabs` | `JSON` 字符串数组 | 徽标文字，如 `["热"]`、`["新"]`；没有徽标为 `[]` |
+| `tags` | `JSON` 字符串数组 | 徽标文字，如 `["热"]`、`["新"]`；没有徽标为 `[]` |
 | `rank` | `String(20)`，可空 | 页面展示的排名**原样保存**，可为 `"1"`、`"12"`、`"置顶"` 等非数字 |
+| `is_active` | `Boolean`，索引，默认 `true` | 是否仍在最新榜单中；爬虫每轮抓完后把消失的条目置为 `false` |
 
 - `heat` / `rank` 用字符串而不是数字：热度的单位（万 / 亿）与排名的形态（置顶 / 广告位）
   都不保证是纯数字，存数字会丢信息；
 - 对外接口 `GET /hot-lists?source=baidu` 返回 `{ source, count, items }`，
-  `count` 是该渠道的总条数，`items` 按入库顺序（即爬虫抓取到的页面顺序）返回；
+  `count` 是该渠道**启用中**的条数，`items` 按入库顺序（即爬虫抓取到的页面顺序）返回，
+  只含 `is_active=true` 的行；`GET /hot-lists/sources` 的计数同样只算启用中的；
+- 榜单里消失的条目**不删除**，只置为禁用：后台仍能查到、编辑、重新启用；
+  重新出现的条目会被爬虫自动置回 `is_active=true` 并刷新热度 / 排名；
 - 后台只在 `/hot-lists/admin` 做**查询 / 编辑 / 删除**，没有新增入口；
 - 爬虫侧不经过接口，直接写入同一个库（`SCRAPY_PERSISTENCE_ENABLED=true` 时），
-  表结构由 `create_all()` 自动建出，不需要额外迁移。
+  表结构由 `create_all()` 自动建出，不需要额外迁移；
+- 老库升级（删除笔误列 `tabs`、补上 `tags` 与 `is_active`）由启动时的
+  `sync_dropped_columns()` / `sync_missing_columns()` / `sync_missing_indexes()` 自动完成，
+  重建镜像重启即可。
 
-手工造几条数据调试（SQLite 语法；`tabs` 存 JSON 文本）：
+手工造几条数据调试（SQLite 语法；`tags` 存 JSON 文本）：
 
 ```sql
-INSERT INTO article_hot_list_info (source, name, heat, tabs, rank, created_at, updated_at)
-VALUES ('baidu', '示例热搜条目', '128.6万', '["热"]', '置顶', datetime('now'), datetime('now'));
+INSERT INTO article_hot_list_info
+    (source, name, heat, tags, rank, is_active, created_at, updated_at)
+VALUES
+    ('baidu', '示例热搜条目', '128.6万', '["热"]', '置顶', 1, datetime('now'), datetime('now'));
 ```
 
 ---
@@ -819,12 +829,12 @@ VALUES ('baidu', '示例热搜条目', '128.6万', '["热"]', '置顶', datetime
 | `test_member_follow.py` | 关注 / 取关 / 关注流 |
 | `test_post.py` / `test_post_comment.py` | 动态发布审核、点赞收藏、评论、获赞/被评论列表 |
 | `test_official_article.py` / `..._interaction.py` / `..._comment.py` / `..._feed.py` | 官号文章 CRUD、互动、与动态合流 |
-| `test_article_hot_list.py` | 热搜榜单按渠道出榜（count / 排序 / 文本排名）、渠道统计、后台列表编辑删除、无新增入口 |
+| `test_article_hot_list.py` | 热搜榜单按渠道出榜（count / 排序 / 文本排名）、只返回启用条目、渠道统计、后台列表按状态筛选 / 编辑（含启停）、无新增入口 |
 | `test_messages.py` | 消息生成、未读数、已读 |
 | `test_resume.py` / `test_resume_public.py` | 六组简历 CRUD、启停、对外合并接口 |
 | `test_site.py` | 欢迎语、关于我密码 |
 | `test_storage.py` | 魔术字节（含 HEIC）、HEIC → JPEG |
-| `test_schema_sync.py` | 自动补列、旧数据不丢、幂等 |
+| `test_schema_sync.py` | 自动补列、补索引、删除废弃列、旧数据不丢、幂等 |
 | `test_legacy_cleanup.py` / `test_retired_features.py` | 下线表清理与已移除接口不再暴露 |
 
 ---

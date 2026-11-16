@@ -11,17 +11,21 @@
 | `source` | `source` | 渠道，如 `baidu`、`weibo` |
 | `name` | `name` | 单条热搜的标题（不是榜单名称） |
 | `heat` | `heat` | 原始热度文本，如 `"128.6万"`，缺失为 NULL |
-| `tabs` | `tabs` | 徽标文字数组，如 `["热"]`，无徽标为 `[]` |
+| `tags` | `tags` | 徽标文字数组，如 `["热"]`，无徽标为 `[]` |
 | `rank` | `rank` | 页面展示的排名原样保存，可为 `"1"`、`"置顶"` 等非数字，缺失为 NULL |
 
 `heat` / `rank` 之所以用字符串而不是数字：热度的单位（万 / 亿）和排名的形态
 （置顶 / 广告位）都不保证是纯数字，存成数字会丢信息。
+
+`is_active` 记录该条是否仍在最新榜单里：爬虫每轮抓完后，把本轮没再出现的条目
+置为 `False`（不删除，保留历史），重新出现的会被抓虫重新置回 `True`。
+前台接口只返回 `is_active=True` 的条目。
 """
 
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import DateTime, Index, JSON, String, text
+from sqlalchemy import Boolean, DateTime, Index, JSON, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.utils import utcnow
@@ -61,7 +65,7 @@ class HotListItem(PKMixin, Base):
         nullable=True,
         comment='原始热度文本，如 "128.6万"；没有热度为 NULL',
     )
-    tabs: Mapped[List[str]] = mapped_column(
+    tags: Mapped[List[str]] = mapped_column(
         JSON,
         nullable=False,
         default=list,
@@ -71,6 +75,13 @@ class HotListItem(PKMixin, Base):
         String(20),
         nullable=True,
         comment='页面展示的排名原样保存，如 "1"、"置顶"；不展示排名为 NULL',
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+        comment="是否启用：False 表示该条已不在最新榜单中",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -91,5 +102,5 @@ class HotListItem(PKMixin, Base):
     def __repr__(self) -> str:  # pragma: no cover - 调试用
         return (
             f"<HotListItem id={self.id} source={self.source!r} "
-            f"rank={self.rank!r} name={self.name!r}>"
+            f"rank={self.rank!r} is_active={self.is_active} name={self.name!r}>"
         )

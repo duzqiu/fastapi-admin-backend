@@ -2,10 +2,10 @@
 
 两组路由，职责分开：
 
-- `router`（`/hot-lists`，无需登录）：前台按渠道取榜单，
-  出参固定 `{ source, count, items }` —— `count` 是该渠道在库里的总条数；
+- `router`（`/hot-lists`，无需登录）：前台按渠道取榜单，只返回启用中的条目，
+  出参固定 `{ source, count, items }` —— `count` 是该渠道启用中的条数；
 - `admin_router`（`/hot-lists/admin`，必须管理员）：后台热搜榜单管理，
-  列表（全字段）/ 详情 / 编辑 / 删除。
+  列表（全字段，含启用 / 禁用状态）/ 详情 / 编辑 / 删除。
 
 **没有新增接口**：条目由爬虫（`scrapy-hotList-crawler`）写入，
 后台刻意不提供「发布」入口。
@@ -85,11 +85,15 @@ def list_items(
         None, description="标题 / 渠道 / 热度 / 排名 模糊搜索"
     ),
     source: Optional[str] = Query(None, max_length=50, description="按渠道精确筛选"),
+    is_active: Optional[bool] = Query(
+        None, description="按状态筛选：true 启用 / false 禁用；不传返回全部"
+    ),
     svc: HotListService = Depends(get_hot_list_service),
 ):
     items, total = svc.list(
         keyword=keyword,
         source=source,
+        is_active=is_active,
         offset=page_params.offset,
         limit=page_params.page_size,
     )
