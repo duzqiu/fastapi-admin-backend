@@ -307,3 +307,55 @@ def test_admin_update_rejects_duplicate_source_and_name(client, db, auth_headers
     )
     assert response.status_code == 400, response.text
     assert "同名" in response.json()["message"]
+
+
+# ==================== 热度格式化 ====================
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # 已经是标准格式：原样保留（幂等）
+        ("452.3万", "452.3万"),
+        ("128.6万", "128.6万"),
+        # 任意格式统一换成「万」
+        ("4523000", "452.3万"),
+        ("3.2亿", "32000万"),
+        ("12.6k", "1.3万"),
+        ("2.4w", "2.4万"),
+        ("856千", "85.6万"),
+        ("1,286", "0.1万"),
+        # 最小 0.x万：1000~9999 保留在万级
+        ("1000", "0.1万"),
+        ("1286", "0.1万"),
+        ("9999", "1万"),
+        # 不足 0.x万（< 1000）降到千
+        ("860", "0.9千"),
+        ("100", "0.1千"),
+        # 空值 / 解析不了的文本原样返回
+        (None, None),
+        ("", None),
+        ("   ", None),
+        ("热度未知", "热度未知"),
+    ],
+)
+def test_format_heat(raw, expected):
+    from app.schemas.article_hot_list import format_heat
+
+    assert format_heat(raw) == expected
+
+
+def test_public_board_normalizes_heat(client, db):
+    """出参热度统一成 xx.x万 / 0.x万 / 0.x千，库里仍存爬虫原文。"""
+    source = unique_source()
+    add_items(
+        db,
+        source,
+        count=1,
+        heat="4523000",
+        name=f"{source}-纯数字热度",
+    )
+    [other] = add_items(db, source, count=1, heat="860")
+
+    body = client.get(PUBLIC_API, params={"source": source}).json()
+    heats = {item["name"]: item["heat"] for item in body["items"]}
+    assert heats[f"{source}-纯数字热度"] == "452.3万"
+    assert heats[other.name] == "0.9千"

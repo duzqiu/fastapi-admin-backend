@@ -7,6 +7,7 @@
 - `HotListItemUpdate`：后台编辑入参（只允许改内容字段，且支持逐字段更新）。
 """
 
+import re
 from datetime import datetime
 from typing import Annotated, Any, List, Optional
 
@@ -69,6 +70,63 @@ def normalize_tags(value: Any) -> List[str]:
     return tags
 
 
+# ------------------------- 热度格式化 -------------------------
+#: 「数字 + 可选单位」的热度文本，如 "452.3万"、"1,286"、"12.5k"
+_HEAT_RE = re.compile(r"^([\d,，]+(?:\.\d+)?)\s*(亿|万|千|[kKwW])?$")
+
+#: 单位 -> 换算成「次」的倍数
+_HEAT_SCALES = {
+    "亿": 100_000_000,
+    "万": 10_000,
+    "w": 10_000,
+    "千": 1_000,
+    "k": 1_000,
+}
+
+
+def _format_unit(value: float, unit: str) -> str:
+    """数值保留 1 位小数，整数部分不为 0 时去掉无意义的 ".0"。"""
+    text = f"{value:.1f}"
+    if text.endswith(".0"):
+        text = text[:-2]
+    return text + unit
+
+
+def format_heat(value: Any) -> Optional[str]:
+    """把任意格式热度统一成中文数量级文本，展示层专用（库里仍存爬虫原文）。
+
+    规则（换算成次数 n 之后）：
+
+    - `n >= 1000`    -> `xx.x万`，最小 `0.x万`（1000 ~ 9999 -> `0.1万` ~ `1万`）
+    - `0 < n < 1000` -> `xx.x千`（`860 -> 0.9千`）
+    - 解析不了 / 空值：原样返回（None / "" -> None），不做破坏性改写
+
+    示例：`"452.3万" -> "452.3万"`、`"4523000" -> "452.3万"`、`"3.2亿" -> "32000万"`、
+    `"1286" -> "0.1万"`、`"860" -> "0.9千"`、`"12.5k" -> "1.3万"`、`"1,286" -> "0.1万"`。
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+
+    match = _HEAT_RE.match(text)
+    if match is None:
+        return text
+
+    number = float(match.group(1).replace(",", "").replace("，", ""))
+    unit = (match.group(2) or "").lower()
+    count = int(round(number * _HEAT_SCALES.get(unit, 1)))
+
+    if count >= 1_000:
+        # 万级（含 1000~9999 的 0.x万）
+        return _format_unit(count / 10_000, "万")
+    if count > 0:
+        # 不足 0.x万（< 1000）时降级到千
+        return _format_unit(count / 1_000, "千")
+    return text
+
+
 class HotListItemOut(ORMBaseModel):
     """热搜榜单条目出参（全部字段，后台表格直接铺）。"""
 
@@ -82,7 +140,13 @@ class HotListItemOut(ORMBaseModel):
     created_at: datetime
     updated_at: datetime
 
-    @field_validator("heat", "rank", mode="before")
+    @field_validator("heat", mode="before")
+    @classmethod
+    def normalize_heat(cls, value: Any) -> Any:
+        """出参统一热度格式：任意输入 -> "xx.x万 / 0.x万 / 0.x千"。"""
+        return format_heat(value)
+
+    @field_validator("rank", mode="before")
     @classmethod
     def coerce_text(cls, value: Any) -> Any:
         """外部写入的可能是数字，统一按文本输出。"""
