@@ -24,7 +24,7 @@
 - [六、环境变量说明](#六环境变量说明)
 - [七、接口清单](#七接口清单)
 - [八、账号体系与认证](#八账号体系与认证)
-- [九、内容体系（动态 / 官号文章 / 互动 / 消息）](#九内容体系动态--官号文章--互动--消息)
+- [九、内容体系（动态 / 官号文章 / 热搜榜单 / 互动 / 消息）](#九内容体系动态--官号文章--热搜榜单--互动--消息)
 - [十、个人网站（简历 + 站点设置）](#十个人网站简历--站点设置)
 - [十一、数据库与结构演进](#十一数据库与结构演进)
 - [十二、测试](#十二测试)
@@ -38,7 +38,7 @@
 | 能力 | 说明 |
 | --- | --- |
 | 双账号体系 | 后台账号（管理员创建、带角色）与会员（邮箱自助注册），JWT 按 `scope` 隔离 |
-| 内容 | 用户动态（发布 / 审核 / 点赞 / 收藏 / 评论）、官号文章（独立域，与动态同流展示） |
+| 内容 | 用户动态（发布 / 审核 / 点赞 / 收藏 / 评论）、官号文章（独立域，与动态同流展示）、热搜榜单（渠道 / 标题 / 热度 / 标签 / 排名） |
 | 社交 | 关注（关注流 / 关注列表）、站内消息（评论 / 点赞 / 审核结果 / 公告）、未读数 |
 | 个人网站 | 六组简历数据（个人信息 / 教育 / 工作 / 项目 / 评价 / 技能标签）+ 对外合并接口 |
 | 站点设置 | 首页欢迎语三件套、「关于我」访问密码（bcrypt） |
@@ -139,12 +139,13 @@ fastapi-admin-backend/
 │   │   ├── post.py                  article_post_info / _like / _favorite / _comment
 │   │   ├── official_article.py      article_official_info / _like / _favorite / _comment + ARTICLE_ID_OFFSET
 │   │   ├── message.py               member_account_message + MessageType
+│   │   ├── article_hot_list.py      article_hot_list_info（热搜榜单，与动态 / 官号文章同属文章板块）
 │   │   ├── resume.py                resume_base_personal_info / _education / _work / _project / _evaluation / _skill_tag
 │   │   ├── site_setting.py          site_setting（单例 id=1）
 │   │   └── __init__.py              统一导出（新增模型必须在此注册）
 │   │
 │   ├── schemas/                     ★ DTO（auth / user / member / email / post / official_article /
-│   │                                  message / resume / resume_public / site / system / common）
+│   │                                  message / article_hot_list / resume / resume_public / site / system / common）
 │   │
 │   ├── repositories/                ★ 数据访问
 │   │   ├── base.py                  通用 CRUD / 分页 / 统计
@@ -156,6 +157,7 @@ fastapi-admin-backend/
 │   │   ├── official_article_interaction_repository.py   点赞 / 收藏
 │   │   ├── official_article_comment_repository.py
 │   │   ├── message_repository.py
+│   │   ├── article_hot_list_repository.py  热搜榜单（按渠道出榜 / 渠道统计 / 后台搜索）
 │   │   ├── resume_repository.py     六类简历数据
 │   │   └── site_repository.py
 │   │
@@ -169,6 +171,7 @@ fastapi-admin-backend/
 │   │   ├── article_feed.py          官号文章 → 帖子出参映射、ID 偏移、列表合并与排序
 │   │   ├── official_article_service.py  官号文章 CRUD / 审核 / 访问量
 │   │   ├── message_service.py       站内消息、未读数、已读
+│   │   ├── article_hot_list_service.py     热搜榜单：按渠道出榜、渠道统计、后台编辑 / 删除
 │   │   ├── resume_service.py        六类简历 CRUD / 启停 / 对外合并
 │   │   ├── site_service.py          欢迎语、关于我密码
 │   │   └── system_service.py        健康检查 / 运行信息 / 首页统计
@@ -178,8 +181,8 @@ fastapi-admin-backend/
 │   │   └── v1/
 │   │       ├── router.py            v1 聚合
 │   │       └── endpoints/           auth / users / member_auth / member_profile / member_public /
-│   │                                members / posts / official_articles / messages / resume /
-│   │                                resume_public / site / system
+│   │                                members / posts / official_articles / article_hot_lists / messages /
+│   │                                resume / resume_public / site / system
 │   ├── middlewares/request_log.py   X-Request-Id、耗时、跳过文档与静态资源
 │   └── static/                      内置资源（default-avatar.svg）
 │
@@ -187,7 +190,7 @@ fastapi-admin-backend/
 ├── scripts/
 │   ├── init_db.py                   手动初始化（等价于启动时的 init_db）
 │   └── migrate_database.py          SQLite → PG/MySQL 数据迁移 / 行数校验
-├── tests/                           22 个 pytest 文件（见第十二节）
+├── tests/                           23 个 pytest 文件（见第十二节）
 ├── data/                            SQLite 与上传目录（git 忽略，自动创建）
 ├── run.py                           开发启动脚本
 ├── requirements.txt / pytest.ini
@@ -343,7 +346,7 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 
 ## 七、接口清单
 
-统一前缀 `/api/v1`，共 **135 个端点**。除标注「公开」外均需 `Authorization: Bearer <access_token>`。
+统一前缀 `/api/v1`，共 **141 个端点**。除标注「公开」外均需 `Authorization: Bearer <access_token>`。
 
 > 权限三档：**公开**（匿名可访问）/ **登录**（任意有效令牌）/ **会员**（`scope=member`）/
 > **管理员**（`scope=staff` 且 `role=admin`）。
@@ -464,6 +467,20 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 | POST | `/official-articles/{id}/view` | 记录访问量 | 公开 |
 
 > 官号文章的**点赞 / 收藏 / 评论**不单开接口，统一走 `/posts/{带偏移的 id}/...`，见第九节。
+
+### 热搜榜单 `/hot-lists`（文章板块）
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| GET | `/hot-lists` | 按渠道出榜：`?source=baidu&limit=50`，返回 `{ source, count, items }` | 公开 |
+| GET | `/hot-lists/sources` | 可用渠道及各渠道条数 | 公开 |
+| GET | `/hot-lists/admin` | 热搜榜单条目列表（全字段，分页 + `keyword` / `source`） | 管理员 |
+| GET | `/hot-lists/admin/{id}` | 条目详情 | 管理员 |
+| PUT | `/hot-lists/admin/{id}` | 编辑条目（`source` / `name` / `heat` / `tabs` / `rank`，按字段更新） | 管理员 |
+| DELETE | `/hot-lists/admin/{id}` | 删除条目 | 管理员 |
+
+> **没有新增接口**：条目由爬虫项目 `scrapy-hotList-crawler` 写入，后台不提供「发布」入口。
+> `count` 是该渠道在库里的**总条数**，不受 `limit` 影响；渠道没有数据时返回 `count = 0` 的空榜单，不是 404。
 
 ### 站内消息 `/messages`
 
@@ -604,7 +621,7 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 
 ---
 
-## 九、内容体系（动态 / 官号文章 / 互动 / 消息）
+## 九、内容体系（动态 / 官号文章 / 热搜榜单 / 互动 / 消息）
 
 ### 9.1 两种内容，一条流
 
@@ -634,6 +651,34 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 
 `member_account_message` 承载站内消息（`MessageType`：评论 / 点赞 / 关注 / 审核结果 / 公告），
 提供未读数、单条已读、全部已读。
+
+### 9.4 热搜榜单（文章板块，数据由爬虫写入）
+
+`article_hot_list_info` 存外部榜单的条目（表名带 `article` 前缀，与动态 / 官号文章同属文章板块），字段与爬虫项目 `scrapy-hotList-crawler` 的
+`ScrapyHotlistCrawlerItem` 一一对应，**爬到什么就存什么**：
+
+| 列 | 类型 | 说明 |
+| --- | --- | --- |
+| `source` | `String(50)`，索引 | 渠道，如 `baidu`、`weibo`、`中国新闻网` |
+| `name` | `String(200)`，索引 | 单条热搜的标题（不是榜单名称） |
+| `heat` | `String(50)`，可空 | 原始热度文本，如 `128.6万`；没有热度为 NULL |
+| `tabs` | `JSON` 字符串数组 | 徽标文字，如 `["热"]`、`["新"]`；没有徽标为 `[]` |
+| `rank` | `String(20)`，可空 | 页面展示的排名**原样保存**，可为 `"1"`、`"12"`、`"置顶"` 等非数字 |
+
+- `heat` / `rank` 用字符串而不是数字：热度的单位（万 / 亿）与排名的形态（置顶 / 广告位）
+  都不保证是纯数字，存数字会丢信息；
+- 对外接口 `GET /hot-lists?source=baidu` 返回 `{ source, count, items }`，
+  `count` 是该渠道的总条数，`items` 按入库顺序（即爬虫抓取到的页面顺序）返回；
+- 后台只在 `/hot-lists/admin` 做**查询 / 编辑 / 删除**，没有新增入口；
+- 爬虫侧不经过接口，直接写入同一个库（`SCRAPY_PERSISTENCE_ENABLED=true` 时），
+  表结构由 `create_all()` 自动建出，不需要额外迁移。
+
+手工造几条数据调试（SQLite 语法；`tabs` 存 JSON 文本）：
+
+```sql
+INSERT INTO article_hot_list_info (source, name, heat, tabs, rank, created_at, updated_at)
+VALUES ('baidu', '示例热搜条目', '128.6万', '["热"]', '置顶', datetime('now'), datetime('now'));
+```
 
 ---
 
@@ -747,6 +792,7 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 | `member` | `account` | `member_account_info`、`member_account_follow`、`member_account_message`、`member_account_email_code` |
 | `article` | `post` | `article_post_info`、`article_post_like`、`article_post_favorite`、`article_post_comment` |
 | `article` | `official` | `article_official_info`、`article_official_like`、`article_official_favorite`、`article_official_comment` |
+| `article` | `hot_list` | `article_hot_list_info`（热搜榜单，与 `article_post_info`、`article_official_info` 同属文章板块） |
 | `resume` | `base` | `resume_base_personal_info`、`resume_base_education`、`resume_base_work`、`resume_base_project`、`resume_base_evaluation`、`resume_base_skill_tag` |
 | `site` | — | `site_setting` |
 
@@ -773,6 +819,7 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 | `test_member_follow.py` | 关注 / 取关 / 关注流 |
 | `test_post.py` / `test_post_comment.py` | 动态发布审核、点赞收藏、评论、获赞/被评论列表 |
 | `test_official_article.py` / `..._interaction.py` / `..._comment.py` / `..._feed.py` | 官号文章 CRUD、互动、与动态合流 |
+| `test_article_hot_list.py` | 热搜榜单按渠道出榜（count / 排序 / 文本排名）、渠道统计、后台列表编辑删除、无新增入口 |
 | `test_messages.py` | 消息生成、未读数、已读 |
 | `test_resume.py` / `test_resume_public.py` | 六组简历 CRUD、启停、对外合并接口 |
 | `test_site.py` | 欢迎语、关于我密码 |

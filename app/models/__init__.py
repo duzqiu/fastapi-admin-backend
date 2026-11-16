@@ -5,6 +5,7 @@
 """
 
 from app.models.email_code import EmailCode, EmailScene
+from app.models.article_hot_list import HotListItem
 from app.models.member import Member, MemberFollow, MemberGender
 from app.models.message import MemberMessage, MessageType
 from app.models.official_article import (
@@ -50,6 +51,7 @@ __all__ = [
     "ORDER_TRANSITIONS",
     "EmailCode",
     "EmailScene",
+    "HotListItem",
     "Member",
     "MemberFollow",
     "MemberGender",

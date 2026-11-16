@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    article_hot_lists,
     auth,
     member_auth,
     member_profile,
@@ -40,6 +41,11 @@ api_router.include_router(posts.router)
 api_router.include_router(posts.comment_router)
 api_router.include_router(official_articles.public_router)
 api_router.include_router(official_articles.router)
+
+# 文章板块-热搜榜单（前台按渠道出榜：无需登录；后台管理：管理员）
+api_router.include_router(article_hot_lists.router)
+api_router.include_router(article_hot_lists.admin_router)
+
 api_router.include_router(messages.router)
 
 # 个人网站-简历信息（独立类目：六组接口自成一体，不与其它域关联；组内按个人信息 / 公司经历分层绑定）

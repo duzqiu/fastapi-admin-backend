@@ -23,6 +23,7 @@ from app.models.member import Member
 from app.models.user import User, UserRole
 from app.services.auth_service import AuthService
 from app.services.email_code_service import EmailCodeService
+from app.services.article_hot_list_service import HotListService
 from app.services.member_auth_service import MemberAuthService
 from app.services.member_service import MemberService
 from app.services.message_service import MessageService
@@ -113,6 +114,10 @@ def get_message_service(db: Session = Depends(get_db)) -> MessageService:
 
 def get_site_service(db: Session = Depends(get_db)) -> SiteService:
     return SiteService(db)
+
+
+def get_hot_list_service(db: Session = Depends(get_db)) -> HotListService:
+    return HotListService(db)
 
 
 # ------------------------- 后台账号认证 / 鉴权 -------------------------
