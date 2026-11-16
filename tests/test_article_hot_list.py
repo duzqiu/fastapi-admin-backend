@@ -278,3 +278,32 @@ def test_admin_can_toggle_status(client, db, auth_headers):
     assert client.get(PUBLIC_API, params={"source": source}).json()["count"] == 1
 
     assert client.put(url, headers=auth_headers, json={"is_active": None}).status_code == 422
+
+def test_source_and_name_are_unique(db):
+    """(source, name) 唯一索引：同一渠道同一标题不允许重复落库。"""
+    from sqlalchemy.exc import IntegrityError
+
+    source = unique_source()
+    name = f"{source}-唯一标题"
+    db.add(HotListItem(source=source, name=name, tags=[]))
+    db.commit()
+
+    db.add(HotListItem(source=source, name=name, tags=["热"]))
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+
+def test_admin_update_rejects_duplicate_source_and_name(client, db, auth_headers):
+    """后台把条目改成和同渠道另一条同名时，返回 400 而不是 500。"""
+    source = unique_source()
+    first, second = add_items(db, source, count=2)
+    second.name = f"{unique_source('other')}-不同名"
+    db.commit()
+
+    response = client.put(
+        f"{ADMIN_API}/{second.id}",
+        headers=auth_headers,
+        json={"name": first.name},
+    )
+    assert response.status_code == 400, response.text
+    assert "同名" in response.json()["message"]

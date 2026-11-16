@@ -46,6 +46,14 @@ class HotListItem(PKMixin, Base):
         # 「按渠道取整榜」是最热的查询，source 单列索引之外再补一个 (source, id)：
         # 过滤 + 排序都能走同一个索引，翻页不用额外排序。
         Index("ix_article_hot_list_info_source_id", "source", "id"),
+        # 同一渠道下同一标题只允许一行：爬虫用 ON CONFLICT (source, name)
+        # 直接 upsert，即使多实例并发也不会写出重复数据。
+        Index(
+            "ux_article_hot_list_info_source_name",
+            "source",
+            "name",
+            unique=True,
+        ),
     )
 
     source: Mapped[str] = mapped_column(

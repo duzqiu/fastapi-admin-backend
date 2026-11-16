@@ -11,6 +11,7 @@
 
 from typing import List, Optional, Tuple
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessError, NotFoundError
@@ -69,8 +70,13 @@ class HotListService:
         for field in ("source", "name"):
             if field in values and values[field] is None:
                 raise BusinessError(f"{'渠道' if field == 'source' else '标题'}不能为空")
-        item = self.items.apply(item, values)
-        self.db.commit()
+        try:
+            item = self.items.apply(item, values)
+            self.db.commit()
+        except IntegrityError:
+            # (source, name) 唯一索引：后台把标题 / 渠道改成已存在的组合时拦住
+            self.db.rollback()
+            raise BusinessError("同一渠道下已存在同名条目")
         self.db.refresh(item)
         return item
 

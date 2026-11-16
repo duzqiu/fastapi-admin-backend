@@ -675,6 +675,9 @@ docker exec admin-backend python -c "from app.core.mailer import send_mail, buil
 - 榜单里消失的条目**不删除**，只置为禁用：后台仍能查到、编辑、重新启用；
   重新出现的条目会被爬虫自动置回 `is_active=true` 并刷新热度 / 排名；
 - 后台只在 `/hot-lists/admin` 做**查询 / 编辑 / 删除**，没有新增入口；
+- `(source, name)` 上有一个**唯一索引** `ux_article_hot_list_info_source_name`：
+  爬虫用 `INSERT ... ON CONFLICT (source, name) DO UPDATE` 落库，同一渠道同一标题
+  永远只有一行，多实例并发写也不会重复；
 - 爬虫侧不经过接口，直接写入同一个库（`SCRAPY_PERSISTENCE_ENABLED=true` 时），
   表结构由 `create_all()` 自动建出，不需要额外迁移；
 - 老库升级（删除笔误列 `tabs`、补上 `tags` 与 `is_active`）由启动时的

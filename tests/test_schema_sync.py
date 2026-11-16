@@ -181,3 +181,22 @@ def test_sync_creates_missing_index_only_once(tmp_path):
 
     assert "ix_article_hot_list_info_is_active" in sync_missing_indexes(engine)
     assert sync_missing_indexes(engine) == []
+
+def test_sync_creates_hot_list_unique_index(tmp_path):
+    """(source, name) 的唯一索引缺失时会被补出来，且重复执行不产生 DDL。"""
+    engine = build_engine(f"sqlite:///{(tmp_path / 'unique.db').as_posix()}")
+    Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql("DROP INDEX ux_article_hot_list_info_source_name")
+
+    assert "ux_article_hot_list_info_source_name" in sync_missing_indexes(engine)
+    assert sync_missing_indexes(engine) == []
+
+    with engine.connect() as connection:
+        indexes = {
+            row[1]: row[2]
+            for row in connection.exec_driver_sql(
+                "PRAGMA index_list(article_hot_list_info)"
+            )
+        }
+    assert indexes["ux_article_hot_list_info_source_name"] == 1, "必须是唯一索引"
